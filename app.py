@@ -14,14 +14,14 @@ client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 st.sidebar.title("Menú de Navegación")
 opcion = st.sidebar.radio(
     "Selecciona un módulo:",
-    ["Dashboard Principal", "🤖 Hablar con Jael", "Control de Personal", "Salidas y Reportes"]
+    ["Dashboard Principal", "🤖 Asistente Inteligente", "Control de Personal", "Salidas y Reportes"]
 )
 
 # Bases de datos en sesión
 if "nomina" not in st.session_state: st.session_state.nomina = []
 if "gastos" not in st.session_state: st.session_state.gastos = []
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [{"role": "assistant", "content": "¡Hola! Soy Jael. Puedes hablarme o escribirme. Dime si necesitas registrar un gasto."}]
+    st.session_state.chat_history = [{"role": "assistant", "content": "¡Hola! Soy Jael. Puedes hablarme por micrófono o escribirme. Dime si necesitas registrar un gasto."}]
 
 # Herramienta para registrar gastos
 herramientas = [
@@ -80,8 +80,8 @@ if opcion == "Dashboard Principal":
         else:
             st.info("No hay horas registradas aún.")
 
-# --- HABLAR CON JAEL ---
-elif opcion == "🤖 Hablar con Jael":
+# --- ASISTENTE INTELIGENTE ---
+elif opcion == "🤖 Asistente Inteligente":
     st.title("🎙️ Asistente Inteligente")
     for msg in st.session_state.chat_history:
         if msg["role"] != "system" and msg.get("content"):
