@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 from openai import OpenAI
 import os
+import io # <-- Nuevo, necesario para crear el Excel
 
 # Configuración inicial
 st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide")
@@ -48,23 +49,17 @@ herramientas = [
 if opcion == "🤖 Hablar con Jael":
     st.header("🎙️ Asistente Inteligente")
 
-    # Mostrar historial de chat
     for msg in st.session_state.chat_history:
         if msg["role"] != "system" and msg.get("content"):
             with st.chat_message(msg["role"]):
                 st.write(msg["content"])
 
-    # Controles de entrada
     audio_value = st.audio_input("Grabar mensaje de voz", key="audio_recorder")
     texto_usuario = st.chat_input("O escribe tu instrucción...")
-    
     mensaje_final = None
 
-    # Procesar solo si hay un texto NUEVO o un audio NUEVO
     if texto_usuario:
         mensaje_final = texto_usuario
-    
-    # Verificamos que el audio exista y no lo hayamos procesado antes
     elif audio_value is not None and st.session_state.get("last_audio") != audio_value:
         with st.spinner("Escuchando..."):
             with open("temp.wav", "wb") as f: 
@@ -72,7 +67,6 @@ if opcion == "🤖 Hablar con Jael":
             transcription = client.audio.transcriptions.create(model="whisper-1", file=open("temp.wav", "rb"))
             mensaje_final = transcription.text
             st.success(f"**Escuché:** {mensaje_final}")
-            # Guardamos el audio como "ya procesado"
             st.session_state.last_audio = audio_value
 
     if mensaje_final:
@@ -107,7 +101,6 @@ if opcion == "🤖 Hablar con Jael":
                 
         st.rerun()
 
-# --- DEMÁS MÓDULOS ---
 elif opcion == "Control de Personal":
     st.header("👥 Control de Personal y Planilla")
     tarifa_hora = 20.00
@@ -134,6 +127,22 @@ elif opcion == "Salidas y Reportes":
 
     if st.session_state.gastos:
         df_gastos = pd.DataFrame(st.session_state.gastos)
+        
+        # --- NUEVO: BOTÓN PARA DESCARGAR EXCEL ---
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_gastos.to_excel(writer, sheet_name='Gastos Semanales', index=False)
+        
+        st.download_button(
+            label="📥 Descargar Reporte en Excel",
+            data=buffer.getvalue(),
+            file_name=f"Reporte_Gastos_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+            mime="application/vnd.ms-excel",
+            type="primary"
+        )
+        st.write("---")
+        # ----------------------------------------
+        
         col1, col2 = st.columns([1, 1])
         with col1: st.dataframe(df_gastos, use_container_width=True)
         with col2: st.altair_chart(alt.Chart(df_gastos.groupby("Categoría")["Monto ($)"].sum().reset_index()).mark_bar(size=30).encode(x=alt.X('Categoría', title=''), y=alt.Y('Monto ($)', title='Total ($)'), color=alt.Color('Categoría', legend=None)).properties(height=300), use_container_width=True)
