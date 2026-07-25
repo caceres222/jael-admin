@@ -105,7 +105,7 @@ elif opcion == "🤖 Asistente Inteligente":
     if mensaje_final:
         st.session_state.chat_history.append({"role": "user", "content": mensaje_final})
         with st.spinner("Jael está analizando..."):
-            mensajes_api = [{"role": "system", "content": "Eres Jael. Usa la herramienta registrar_gasto si mencionan un gasto."}]
+            mensajes_api = [{"role": "system", "content": "Eres Jael, la asistente administrativa oficial de las sinagogas Safra y Jemal. Eres amable, profesional y directa. Conoces las tarifas de pago ($20/hora) y las categorías de gastos (Desayunos, Limpieza, Mantenimiento). Tu trabajo principal es ayudar al administrador. Usa la herramienta registrar_gasto SOLO si el usuario te pide registrar una compra. Responde siempre en el mismo idioma en el que te hablen."}]
             mensajes_api.extend([{"role": m["role"], "content": m.get("content", "")} for m in st.session_state.chat_history])
             response = client.chat.completions.create(model="gpt-3.5-turbo", messages=mensajes_api, tools=herramientas, tool_choice="auto")
             mensaje_respuesta = response.choices[0].message
