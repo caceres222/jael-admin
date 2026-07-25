@@ -26,17 +26,12 @@ if opcion == "Dashboard Principal":
 
 elif opcion == "Control de Personal":
     st.header("👥 Control de Personal y Planilla")
-    
-    # Tarifa fija definida
     tarifa_hora = 20.00
     st.info(f"💵 Tarifa base por hora configurada: **${tarifa_hora:.2f}**")
-    st.write("Corte de nómina: **Cada 15 días**")
     
-    # Inicializar la base de datos temporal para la sesión
     if "nomina" not in st.session_state:
         st.session_state.nomina = []
         
-    # Formulario para registrar horas
     with st.form("registro_horas"):
         st.subheader("Registrar Horas Trabajadas")
         col1, col2 = st.columns(2)
@@ -45,33 +40,67 @@ elif opcion == "Control de Personal":
         with col2:
             horas = st.number_input("Horas Trabajadas", min_value=0.0, step=0.5)
         
-        submit = st.form_submit_button("Registrar en Planilla")
-        
-        if submit and nombre:
+        if st.form_submit_button("Registrar en Planilla") and nombre:
             pago_total = horas * tarifa_hora
-            st.session_state.nomina.append({
-                "Empleado": nombre,
-                "Horas": horas,
-                "Tarifa": f"${tarifa_hora:.2f}",
-                "Pago Total": f"${pago_total:.2f}"
-            })
-            st.success(f"✅ Registrado: {nombre} - Pago calculado: ${pago_total:.2f}")
+            st.session_state.nomina.append({"Empleado": nombre, "Horas": horas, "Tarifa": f"${tarifa_hora:.2f}", "Pago Total": f"${pago_total:.2f}"})
+            st.success(f"✅ Registrado: {nombre} - Pago: ${pago_total:.2f}")
             
-    # Mostrar la tabla actualizada
     if st.session_state.nomina:
-        st.subheader("📋 Planilla Actual (Quincenal)")
-        df_nomina = pd.DataFrame(st.session_state.nomina)
-        st.dataframe(df_nomina, use_container_width=True)
-        
+        st.subheader("📋 Planilla Actual")
+        st.dataframe(pd.DataFrame(st.session_state.nomina), use_container_width=True)
         if st.button("🔴 Hacer Corte Quincenal (Limpiar Tabla)"):
             st.session_state.nomina = []
             st.rerun()
 
 elif opcion == "Salidas y Reportes":
-    st.header("📈 Reportes de Gastos y Salidas")
-    st.write("Los reportes en Excel y gráficos se generarán los domingos a las 12:00 AM.")
-    datos_gastos = pd.DataFrame({"Categoría": ["Desayunos", "Limpieza"], "Monto ($)": [300, 150]})
-    st.bar_chart(datos_gastos.set_index("Categoría"))
+    st.header("📈 Control de Gastos y Salidas")
+    
+    # Inicializar la base de datos de gastos en la sesión
+    if "gastos" not in st.session_state:
+        st.session_state.gastos = []
+        
+    # Formulario para registrar un nuevo gasto
+    with st.form("registro_gasto"):
+        st.subheader("Registrar Nueva Compra o Gasto")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            categoria = st.selectbox("Categoría", ["Desayunos de fin de semana", "Insumos de Limpieza", "Mantenimiento / Cuarto", "Proveedores (Pedidos fijos)", "Otros Gastos Extra"])
+        with col2:
+            descripcion = st.text_input("Descripción breve (ej. Frutas, Cloro, etc.)")
+        with col3:
+            monto = st.number_input("Monto Pagado ($)", min_value=0.0, step=1.0)
+            
+        fecha_actual = datetime.now().strftime("%Y-%m-%d")
+        
+        if st.form_submit_button("Guardar Gasto") and descripcion and monto > 0:
+            st.session_state.gastos.append({
+                "Fecha": fecha_actual,
+                "Categoría": categoria,
+                "Descripción": descripcion,
+                "Monto ($)": monto
+            })
+            st.success(f"✅ Gasto guardado: {descripcion} por ${monto:.2f}")
+
+    # Mostrar la tabla y el gráfico si hay gastos registrados
+    if st.session_state.gastos:
+        df_gastos = pd.DataFrame(st.session_state.gastos)
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("📋 Historial de Gastos")
+            st.dataframe(df_gastos, use_container_width=True)
+            
+        with col2:
+            st.subheader("📊 Gastos por Categoría")
+            # Agrupar los datos para el gráfico
+            gastos_agrupados = df_gastos.groupby("Categoría")["Monto ($)"].sum().reset_index()
+            # Crear el gráfico de barras
+            st.bar_chart(gastos_agrupados.set_index("Categoría"))
+            
+            # Mostrar total gastado
+            total = df_gastos["Monto ($)"].sum()
+            st.info(f"💰 **Total Acumulado:** ${total:.2f}")
 
 elif opcion == "Configuración":
     st.header("⚙️ Configuración del Sistema")
