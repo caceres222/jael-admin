@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import altair as alt  # <-- Añadimos esta librería para mejores gráficos
 from datetime import datetime
 
 # Configuración inicial de la página
@@ -55,11 +56,9 @@ elif opcion == "Control de Personal":
 elif opcion == "Salidas y Reportes":
     st.header("📈 Control de Gastos y Salidas")
     
-    # Inicializar la base de datos de gastos en la sesión
     if "gastos" not in st.session_state:
         st.session_state.gastos = []
         
-    # Formulario para registrar un nuevo gasto
     with st.form("registro_gasto"):
         st.subheader("Registrar Nueva Compra o Gasto")
         col1, col2, col3 = st.columns(3)
@@ -81,7 +80,6 @@ elif opcion == "Salidas y Reportes":
             })
             st.success(f"✅ Gasto guardado: {descripcion} por ${monto:.2f}")
 
-    # Mostrar la tabla y el gráfico si hay gastos registrados
     if st.session_state.gastos:
         df_gastos = pd.DataFrame(st.session_state.gastos)
         
@@ -93,10 +91,16 @@ elif opcion == "Salidas y Reportes":
             
         with col2:
             st.subheader("📊 Gastos por Categoría")
-            # Agrupar los datos para el gráfico
             gastos_agrupados = df_gastos.groupby("Categoría")["Monto ($)"].sum().reset_index()
-            # Crear el gráfico de barras
-            st.bar_chart(gastos_agrupados.set_index("Categoría"))
+            
+            # NUEVO GRÁFICO CON BARRAS DELGADAS (30px)
+            chart = alt.Chart(gastos_agrupados).mark_bar(size=30).encode(
+                x=alt.X('Categoría', title=''),
+                y=alt.Y('Monto ($)', title='Total Gastado ($)'),
+                color=alt.Color('Categoría', legend=None)
+            ).properties(height=300)
+            
+            st.altair_chart(chart, use_container_width=True)
             
             # Mostrar total gastado
             total = df_gastos["Monto ($)"].sum()
