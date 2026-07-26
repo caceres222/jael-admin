@@ -7,21 +7,20 @@ from openai import OpenAI
 import os
 import io
 
-# Configuración inicial y ocultar barra superior de Streamlit
-st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide")
+# Configuración inicial
+st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide", initial_sidebar_state="collapsed")
 
-# TRUCO CSS PARA ESCONDER LOS BOTONES DE GITHUB, DEPLOY Y MENÚ
+# TRUCO CSS CORREGIDO: Oculta GitHub y Deploy, pero MANTIENE el botón del menú (Sidebar) en móviles
 ocultar_menu = """
     <style>
     #MainMenu {visibility: hidden;}
     .stAppDeployButton {display:none;}
-    header {visibility: hidden;}
     footer {visibility: hidden;}
+    /* Hacemos transparente el fondo del header pero dejamos sus botones funcionando */
+    header {background-color: transparent !important;}
     </style>
 """
 st.markdown(ocultar_menu, unsafe_allow_html=True)
-
-# (Opcional) Forzar modo espectador en la configuración
 st.set_option("client.toolbarMode", "viewer")
 
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -117,7 +116,7 @@ elif opcion == "🤖 Asistente Inteligente":
     if mensaje_final:
         st.session_state.chat_history.append({"role": "user", "content": mensaje_final})
         with st.spinner("Jael está analizando..."):
-            mensajes_api = [{"role": "system", "content": "Eres Jael, la asistente administrativa oficial de las sinagogas Safra y Jemal. Eres amable, profesional y directa. Conoces las tarifas de pago ($20/hora) y las categorías de gastos. Usa la herramienta registrar_gasto SOLO si el usuario te pide registrar una compra. Responde siempre en el mismo idioma en el que te hablen."}]
+            mensajes_api = [{"role": "system", "content": "Eres Jael, la asistente administrativa oficial de las sinagogas Safra y Jemal. Eres amable, profesional y directa. Conoces las tarifas de pago ($20/hora). Usa la herramienta registrar_gasto SOLO si piden registrar una compra. Responde siempre en el mismo idioma en el que te hablen."}]
             mensajes_api.extend([{"role": m["role"], "content": m.get("content", "")} for m in st.session_state.chat_history])
             response = client.chat.completions.create(model="gpt-3.5-turbo", messages=mensajes_api, tools=herramientas, tool_choice="auto")
             mensaje_respuesta = response.choices[0].message
