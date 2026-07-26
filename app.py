@@ -7,17 +7,16 @@ from openai import OpenAI
 import os
 import io
 
-# Configuración inicial
-st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide", initial_sidebar_state="collapsed")
+# Configuración inicial 
+st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide", initial_sidebar_state="auto")
 
-# TRUCO CSS CORREGIDO: Oculta GitHub y Deploy, pero MANTIENE el botón del menú (Sidebar) en móviles
+# TRUCO CSS: Solo ocultamos GitHub, el botón Deploy y el footer. 
+# Mantenemos el Header intacto para que no desaparezca el menú en el celular.
 ocultar_menu = """
     <style>
     #MainMenu {visibility: hidden;}
     .stAppDeployButton {display:none;}
     footer {visibility: hidden;}
-    /* Hacemos transparente el fondo del header pero dejamos sus botones funcionando */
-    header {background-color: transparent !important;}
     </style>
 """
 st.markdown(ocultar_menu, unsafe_allow_html=True)
