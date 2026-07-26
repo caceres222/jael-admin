@@ -10,3 +10,10 @@ altair
 openai
 openpyxl
 streamlit-geolocation
+streamlit
+pandas
+altair
+openai
+openpyxl
+streamlit-geolocation
+supabase
