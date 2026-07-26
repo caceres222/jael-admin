@@ -4,3 +4,9 @@ pandas
 openpyxl
 python-dotenv
 streamlit-geolocation
+streamlit
+pandas
+altair
+openai
+openpyxl
+streamlit-geolocation
