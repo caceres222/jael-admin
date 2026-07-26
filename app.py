@@ -4,13 +4,15 @@ import altair as alt
 import json
 from datetime import datetime
 from openai import OpenAI
+import math
 import os
 import io
+from streamlit_geolocation import streamlit_geolocation
 
 # Configuración inicial 
 st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide", initial_sidebar_state="auto")
 
-# TRUCO CSS: Solo ocultamos GitHub, el botón Deploy y el footer. 
+# TRUCO CSS: Ocultamos GitHub, Deploy y Footer
 ocultar_menu = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -19,13 +21,29 @@ ocultar_menu = """
     </style>
 """
 st.markdown(ocultar_menu, unsafe_allow_html=True)
-st.set_option("client.toolbarMode", "viewer")
 
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
+# --- CONFIGURACIÓN DE GEOLOCALIZACIÓN ---
+# Coordenadas de la Sinagoga (EJEMPLO - Cámbialas por las reales)
+LAT_SINAGOGA = 25.7617 # Ejemplo: Latitud de Miami
+LON_SINAGOGA = -80.1918 # Ejemplo: Longitud de Miami
+RADIO_PERMITIDO_METROS = 200.0 # Distancia máxima permitida en metros
+
+def calcular_distancia(lat1, lon1, lat2, lon2):
+    """Calcula la distancia en metros entre dos coordenadas usando la fórmula de Haversine"""
+    R = 6371000 # Radio de la tierra en metros
+    phi_1 = math.radians(lat1)
+    phi_2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi_1) * math.cos(phi_2) * math.sin(delta_lambda / 2.0) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
 # --- BASES DE DATOS EN SESIÓN ---
 if "gastos" not in st.session_state: st.session_state.gastos = []
-if "empleados" not in st.session_state: st.session_state.empleados = {"Juan Perez": "1234"} # Empleado de prueba
+if "empleados" not in st.session_state: st.session_state.empleados = {"Juan Perez": "1234"}
 if "asistencia" not in st.session_state: st.session_state.asistencia = []
 if "admin_logged_in" not in st.session_state: st.session_state.admin_logged_in = False
 if "emp_logged_in" not in st.session_state: st.session_state.emp_logged_in = None
@@ -57,7 +75,7 @@ st.sidebar.title("Acceso")
 tipo_acceso = st.sidebar.radio("Selecciona tu perfil:", ["Área de Empleados", "Administración"])
 
 # ==========================================
-# VISTA: ÁREA DE EMPLEADOS
+# VISTA: ÁREA DE EMPLEADOS (CON GPS)
 # ==========================================
 if tipo_acceso == "Área de Empleados":
     st.title("⏱️ Reloj Checador")
@@ -80,18 +98,37 @@ if tipo_acceso == "Área de Empleados":
         emp = st.session_state.emp_logged_in
         st.success(f"Hola, **{emp}**")
         
-        # ERROR CORREGIDO: Se eliminó el parámetro size="small" que causaba el fallo
         if st.button("Cerrar mi sesión"):
             st.session_state.emp_logged_in = None
             st.rerun()
             
+        st.write("---")
+        
+        # 1. Pedi ubicación al empleado
+        st.write("### 📍 Verificación de Ubicación")
+        st.info("Por favor, permite el acceso a tu ubicación para habilitar los botones.")
+        loc = streamlit_geolocation()
+        
+        ubicacion_valida = False
+        if loc and loc.get("latitude") and loc.get("longitude"):
+            lat_emp = loc["latitude"]
+            lon_emp = loc["longitude"]
+            distancia = calcular_distancia(LAT_SINAGOGA, LON_SINAGOGA, lat_emp, lon_emp)
+            
+            if distancia <= RADIO_PERMITIDO_METROS:
+                st.success(f"✅ Ubicación confirmada (Estás a {int(distancia)}m)")
+                ubicacion_valida = True
+            else:
+                st.error(f"❌ Estás muy lejos de la sinagoga (Estás a {int(distancia)}m). Debes estar a menos de {int(RADIO_PERMITIDO_METROS)}m.")
+        
         st.write("---")
         turnos_abiertos = [i for i, t in enumerate(st.session_state.asistencia) if t["Empleado"] == emp and t["Salida"] is None]
         
         col1, col2 = st.columns(2)
         with col1:
             if not turnos_abiertos:
-                if st.button("🟢 MARCAR ENTRADA", use_container_width=True):
+                # El botón solo funciona si ubicacion_valida es True
+                if st.button("🟢 MARCAR ENTRADA", use_container_width=True, disabled=not ubicacion_valida):
                     st.session_state.asistencia.append({
                         "Empleado": emp,
                         "Fecha": datetime.now().strftime("%Y-%m-%d"),
@@ -105,14 +142,14 @@ if tipo_acceso == "Área de Empleados":
                 
         with col2:
             if turnos_abiertos:
-                if st.button("🔴 MARCAR SALIDA", use_container_width=True):
+                # El botón solo funciona si ubicacion_valida es True
+                if st.button("🔴 MARCAR SALIDA", use_container_width=True, disabled=not ubicacion_valida):
                     idx = turnos_abiertos[0]
                     hora_salida = datetime.now()
                     str_salida = hora_salida.strftime("%H:%M:%S")
                     str_entrada = st.session_state.asistencia[idx]["Entrada"]
                     fecha = st.session_state.asistencia[idx]["Fecha"]
                     
-                    # Calculamos las horas transcurridas
                     fmt = "%Y-%m-%d %H:%M:%S"
                     t_in = datetime.strptime(f"{fecha} {str_entrada}", fmt)
                     horas_trabajadas = (hora_salida - t_in).total_seconds() / 3600.0
@@ -139,7 +176,6 @@ elif tipo_acceso == "Administración":
         st.title("🔐 Acceso Administrativo")
         pwd = st.text_input("Contraseña de Administrador", type="password")
         if st.button("Entrar"):
-            # Contraseña por defecto (puedes cambiarla aquí):
             if pwd == "admin123": 
                 st.session_state.admin_logged_in = True
                 st.rerun()
@@ -153,14 +189,9 @@ elif tipo_acceso == "Administración":
             
         opcion_admin = st.sidebar.radio("Módulo:", ["Dashboard Principal", "🤖 Asistente Inteligente", "Personal y Planilla", "Salidas y Reportes"])
 
-        # --- DASHBOARD PRINCIPAL ---
         if opcion_admin == "Dashboard Principal":
             st.title("🕌 Jael - Panel de Control")
-            st.write("Resumen financiero y operativo")
-            st.write("---")
             total_gastos = sum(g["Monto ($)"] for g in st.session_state.gastos) if st.session_state.gastos else 0
-            
-            # Cálculo de nómina en base a horas * $20
             tarifa = 20.0
             total_horas_todas = sum(t["Horas"] for t in st.session_state.asistencia)
             total_nomina = total_horas_todas * tarifa
@@ -171,7 +202,6 @@ elif tipo_acceso == "Administración":
             col3.metric(label="🏢 TOTAL OPERACIÓN", value=f"${(total_gastos + total_nomina):,.2f}")
             col4.metric(label="👷 Horas Registradas", value=f"{total_horas_todas:.1f}")
 
-        # --- ASISTENTE INTELIGENTE ---
         elif opcion_admin == "🤖 Asistente Inteligente":
             st.title("🎙️ Asistente Inteligente")
             for msg in st.session_state.chat_history:
@@ -208,11 +238,8 @@ elif tipo_acceso == "Administración":
                         st.session_state.chat_history.append({"role": "assistant", "content": getattr(mensaje_respuesta, "content", "Entendido.")})
                 st.rerun()
 
-        # --- PERSONAL Y PLANILLA ---
         elif opcion_admin == "Personal y Planilla":
             st.title("👥 Control de Empleados")
-            
-            st.subheader("Crear Nuevo Empleado")
             with st.form("nuevo_emp_form"):
                 col1, col2 = st.columns(2)
                 with col1: nuevo_nombre = st.text_input("Nombre Completo")
@@ -220,17 +247,14 @@ elif tipo_acceso == "Administración":
                 if st.form_submit_button("Añadir Empleado") and nuevo_nombre and nuevo_pin:
                     st.session_state.empleados[nuevo_nombre] = nuevo_pin
                     st.success(f"✅ {nuevo_nombre} añadido correctamente.")
-            
             st.write("---")
-            st.subheader("Registro de Horas Global")
             if st.session_state.asistencia:
                 df_global = pd.DataFrame(st.session_state.asistencia)
-                df_global["Pago ($)"] = df_global["Horas"] * 20.0  # Asumiendo tarifa $20/hr
+                df_global["Pago ($)"] = df_global["Horas"] * 20.0
                 st.dataframe(df_global, use_container_width=True)
             else:
                 st.info("Nadie ha registrado horas todavía.")
 
-        # --- REPORTES Y SALIDAS ---
         elif opcion_admin == "Salidas y Reportes":
             st.title("📈 Gastos y Salidas")
             with st.form("registro_gasto"):
