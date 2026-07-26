@@ -79,7 +79,9 @@ if tipo_acceso == "Área de Empleados":
     else:
         emp = st.session_state.emp_logged_in
         st.success(f"Hola, **{emp}**")
-        if st.button("Cerrar mi sesión", size="small"):
+        
+        # ERROR CORREGIDO: Se eliminó el parámetro size="small" que causaba el fallo
+        if st.button("Cerrar mi sesión"):
             st.session_state.emp_logged_in = None
             st.rerun()
             
