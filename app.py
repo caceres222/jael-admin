@@ -26,9 +26,9 @@ client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # --- CONFIGURACIÓN DE GEOLOCALIZACIÓN ---
 # Coordenadas de la Sinagoga (EJEMPLO - Cámbialas por las reales)
-LAT_SINAGOGA = 25.7617 # Ejemplo: Latitud de Miami
-LON_SINAGOGA = -80.1918 # Ejemplo: Longitud de Miami
-RADIO_PERMITIDO_METROS = 200.0 # Distancia máxima permitida en metros
+LAT_SINAGOGA = 40.2417 # 
+LON_SINAGOGA = -74.0013 #
+RADIO_PERMITIDO_METROS = 100.0 # Distancia máxima permitida en metros
 
 def calcular_distancia(lat1, lon1, lat2, lon2):
     """Calcula la distancia en metros entre dos coordenadas usando la fórmula de Haversine"""
