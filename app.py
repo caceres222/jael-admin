@@ -7,8 +7,23 @@ from openai import OpenAI
 import os
 import io
 
-# Configuración inicial
+# Configuración inicial y ocultar barra superior de Streamlit
 st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide")
+
+# TRUCO CSS PARA ESCONDER LOS BOTONES DE GITHUB, DEPLOY Y MENÚ
+ocultar_menu = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    .stAppDeployButton {display:none;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
+"""
+st.markdown(ocultar_menu, unsafe_allow_html=True)
+
+# (Opcional) Forzar modo espectador en la configuración
+st.set_option("client.toolbarMode", "viewer")
+
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 st.sidebar.title("Menú de Navegación")
@@ -49,13 +64,11 @@ if opcion == "Dashboard Principal":
     st.write("Resumen financiero y operativo de Safra y Jemal")
     st.write("---")
     
-    # Calcular totales
     total_gastos = sum(g["Monto ($)"] for g in st.session_state.gastos) if st.session_state.gastos else 0
     total_nomina = sum(float(n["Pago Total"].replace("$", "")) for n in st.session_state.nomina) if st.session_state.nomina else 0
     total_empleados = len(st.session_state.nomina)
     total_operacion = total_gastos + total_nomina
     
-    # Mostrar tarjetas con números grandes
     col1, col2, col3, col4 = st.columns(4)
     col1.metric(label="💰 Gastos de la Semana", value=f"${total_gastos:,.2f}")
     col2.metric(label="👥 Pago de Nómina", value=f"${total_nomina:,.2f}")
@@ -64,7 +77,6 @@ if opcion == "Dashboard Principal":
     
     st.write("---")
     
-    # Mostrar resumen rápido en dos columnas
     col_g, col_n = st.columns(2)
     with col_g:
         st.subheader("Últimos Gastos Registrados")
@@ -105,7 +117,7 @@ elif opcion == "🤖 Asistente Inteligente":
     if mensaje_final:
         st.session_state.chat_history.append({"role": "user", "content": mensaje_final})
         with st.spinner("Jael está analizando..."):
-            mensajes_api = [{"role": "system", "content": "Eres Jael, la asistente administrativa oficial de las sinagogas Safra y Jemal. Eres amable, profesional y directa. Conoces las tarifas de pago ($20/hora) y las categorías de gastos (Desayunos, Limpieza, Mantenimiento). Tu trabajo principal es ayudar al administrador. Usa la herramienta registrar_gasto SOLO si el usuario te pide registrar una compra. Responde siempre en el mismo idioma en el que te hablen."}]
+            mensajes_api = [{"role": "system", "content": "Eres Jael, la asistente administrativa oficial de las sinagogas Safra y Jemal. Eres amable, profesional y directa. Conoces las tarifas de pago ($20/hora) y las categorías de gastos. Usa la herramienta registrar_gasto SOLO si el usuario te pide registrar una compra. Responde siempre en el mismo idioma en el que te hablen."}]
             mensajes_api.extend([{"role": m["role"], "content": m.get("content", "")} for m in st.session_state.chat_history])
             response = client.chat.completions.create(model="gpt-3.5-turbo", messages=mensajes_api, tools=herramientas, tool_choice="auto")
             mensaje_respuesta = response.choices[0].message
