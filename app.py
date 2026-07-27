@@ -23,7 +23,6 @@ st.markdown(ocultar_menu, unsafe_allow_html=True)
 
 # --- CONEXIONES ---
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-# Inicializar la conexión nativa súper estable de Streamlit a Supabase
 supabase = st.connection("supabase", type=SupabaseConnection)
 
 # --- GEOLOCALIZACIÓN ---
@@ -129,20 +128,26 @@ if tipo_acceso == "Área de Empleados":
         with col1:
             if not turno_abierto:
                 if st.button("🟢 MARCAR ENTRADA", use_container_width=True, disabled=not ubicacion_valida):
-                    supabase.table("asistencia").insert({"empleado": emp, "fecha": datetime.now().strftime("%Y-%m-%d"), "entrada": datetime.now().strftime("%H:%M:%S"), "horas": 0.0}).execute()
-                    st.rerun()
+                    try:
+                        supabase.table("asistencia").insert({"empleado": emp, "fecha": datetime.now().strftime("%Y-%m-%d"), "entrada": datetime.now().strftime("%H:%M:%S"), "horas": 0.0}).execute()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al marcar entrada: {e}")
             else:
                 st.button("🟢 ENTRADA REGISTRADA", disabled=True, use_container_width=True)
                 
         with col2:
             if turno_abierto:
                 if st.button("🔴 MARCAR SALIDA", use_container_width=True, disabled=not ubicacion_valida):
-                    id_turno = turno_abierto[0]["id"]
-                    h_salida = datetime.now()
-                    t_in = datetime.strptime(f"{turno_abierto[0]['fecha']} {turno_abierto[0]['entrada']}", "%Y-%m-%d %H:%M:%S")
-                    horas_trabajadas = (h_salida - t_in).total_seconds() / 3600.0
-                    supabase.table("asistencia").update({"salida": h_salida.strftime("%H:%M:%S"), "horas": round(horas_trabajadas, 2)}).eq("id", id_turno).execute()
-                    st.rerun()
+                    try:
+                        id_turno = turno_abierto[0]["id"]
+                        h_salida = datetime.now()
+                        t_in = datetime.strptime(f"{turno_abierto[0]['fecha']} {turno_abierto[0]['entrada']}", "%Y-%m-%d %H:%M:%S")
+                        horas_trabajadas = (h_salida - t_in).total_seconds() / 3600.0
+                        supabase.table("asistencia").update({"salida": h_salida.strftime("%H:%M:%S"), "horas": round(horas_trabajadas, 2)}).eq("id", id_turno).execute()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al marcar salida: {e}")
             else:
                 st.button("🔴 MARCAR SALIDA", disabled=True, use_container_width=True)
                 
@@ -203,24 +208,49 @@ elif tipo_acceso == "Administración":
                     for tc in resp.tool_calls:
                         if tc.function.name == "registrar_gasto":
                             args = json.loads(tc.function.arguments)
-                            supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": args["categoria"], "descripcion": args["descripcion"], "monto": args["monto"]}).execute()
-                            st.session_state.chat_history.append({"role": "assistant", "content": f"✅ Guardado en nube: ${args['monto']} en {args['categoria']}."})
+                            try:
+                                supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": args["categoria"], "descripcion": args["descripcion"], "monto": args["monto"]}).execute()
+                                st.session_state.chat_history.append({"role": "assistant", "content": f"✅ Guardado en nube: ${args['monto']} en {args['categoria']}."})
+                            except Exception as e:
+                                st.session_state.chat_history.append({"role": "assistant", "content": f"❌ Error al guardar el gasto: {e}"})
                 else:
                     st.session_state.chat_history.append({"role": "assistant", "content": getattr(resp, "content", "Entendido.")})
                 st.rerun()
 
         elif op == "Personal":
             st.title("👥 Empleados")
+            
+            # Tabla de empleados existentes
+            try:
+                emp_data = supabase.table("empleados").select("*").execute().data
+                if emp_data:
+                    st.write("**Empleados Registrados:**")
+                    st.dataframe(pd.DataFrame(emp_data))
+            except Exception:
+                pass
+                
+            st.write("---")
             with st.form("f1"):
+                st.write("**Añadir Nuevo Empleado**")
                 c1, c2 = st.columns(2)
-                nombre = c1.text_input("Nombre")
+                nombre = c1.text_input("Nombre Completo")
                 pin = c2.text_input("PIN (4 dígitos)", max_chars=4)
                 if st.form_submit_button("Añadir") and nombre and pin:
-                    supabase.table("empleados").insert({"nombre": nombre, "pin": pin}).execute()
-                    st.success("✅ Añadido a la nube.")
+                    try:
+                        supabase.table("empleados").insert({"nombre": nombre, "pin": pin}).execute()
+                        st.success(f"✅ {nombre} añadido a la nube.")
+                        st.rerun()
+                    except Exception as e:
+                        if "duplicate key" in str(e).lower() or "23505" in str(e):
+                            st.error("❌ Ese nombre de empleado ya existe.")
+                        else:
+                            st.error(f"❌ Detalles del error: {str(e)}")
+                            
+            st.write("---")
             if datos_horas:
                 df = pd.DataFrame(datos_horas)
                 df["pago"] = df["horas"] * 20.0
+                st.write("**Registro de Horas Global:**")
                 st.dataframe(df[["empleado", "fecha", "entrada", "salida", "horas", "pago"]], use_container_width=True)
 
         elif op == "Gastos":
@@ -231,7 +261,12 @@ elif tipo_acceso == "Administración":
                 desc = c2.text_input("Descripción")
                 monto = c3.number_input("Monto ($)", min_value=0.0)
                 if st.form_submit_button("Guardar") and desc and monto > 0:
-                    supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": cat, "descripcion": desc, "monto": monto}).execute()
-                    st.success("✅ Guardado en la nube.")
+                    try:
+                        supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": cat, "descripcion": desc, "monto": monto}).execute()
+                        st.success("✅ Guardado en la nube.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error al guardar: {str(e)}")
+            
             if datos_gastos:
                 st.dataframe(pd.DataFrame(datos_gastos)[["fecha", "categoria", "descripcion", "monto"]], use_container_width=True)
