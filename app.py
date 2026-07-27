@@ -14,9 +14,31 @@ st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌
 # TRUCO CSS
 ocultar_menu = """
     <style>
+    /* Ocultar elementos de Streamlit/GitHub */
     #MainMenu {visibility: hidden;}
     .stAppDeployButton {display:none;}
     footer {visibility: hidden;}
+    
+    /* HACER MÁS GRANDES LOS BOTONES Y MENÚS PARA CELULAR */
+    /* Separación de las opciones del menú de radio */
+    .stRadio > div {
+        gap: 20px; /* Más espacio entre opciones */
+    }
+    /* Hacer el texto de las opciones más grande */
+    .stRadio p {
+        font-size: 20px !important;
+        padding-top: 5px;
+    }
+    /* Hacer el circulito del botón más grande */
+    .stRadio [data-baseweb="radio"] div {
+        height: 24px;
+        width: 24px;
+    }
+    
+    /* Hacer la letra de los selectbox (menú desplegable) más grande */
+    .stSelectbox p {
+        font-size: 18px !important;
+    }
     </style>
 """
 st.markdown(ocultar_menu, unsafe_allow_html=True)
