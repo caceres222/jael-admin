@@ -26,8 +26,13 @@ client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 @st.cache_resource
 def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    # Detector automático de secretos (busca la llave normal o dentro de connections)
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+    except KeyError:
+        url = st.secrets["connections"]["supabase"]["SUPABASE_URL"]
+        key = st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
     return create_client(url, key)
 
 supabase = init_connection()
