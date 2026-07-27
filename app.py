@@ -6,7 +6,7 @@ from datetime import datetime
 from openai import OpenAI
 import math
 from streamlit_geolocation import streamlit_geolocation
-from supabase import create_client, Client
+from st_supabase_connection import SupabaseConnection
 
 # Configuración inicial 
 st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide", initial_sidebar_state="auto")
@@ -21,17 +21,12 @@ ocultar_menu = """
 """
 st.markdown(ocultar_menu, unsafe_allow_html=True)
 
-# --- CONFIGURACIÓN DE CONEXIONES ---
-# Conexión a OpenAI
+# --- CONEXIONES ---
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# Inicializar la conexión nativa súper estable de Streamlit a Supabase
+supabase = st.connection("supabase", type=SupabaseConnection)
 
-# Conexión a Supabase
-url: str = st.secrets["SUPABASE_URL"]
-key: str = st.secrets["SUPABASE_KEY"]
-supabase: Client = create_client(url, key)
-
-# --- CONFIGURACIÓN DE GEOLOCALIZACIÓN ---
-# Coordenadas de la Sinagoga (Cámbialas por las tuyas)
+# --- GEOLOCALIZACIÓN ---
 LAT_SINAGOGA = 25.7617 
 LON_SINAGOGA = -80.1918 
 RADIO_PERMITIDO_METROS = 200.0 
@@ -46,13 +41,12 @@ def calcular_distancia(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-# --- INICIALIZAR ESTADOS ---
+# --- ESTADOS ---
 if "admin_logged_in" not in st.session_state: st.session_state.admin_logged_in = False
 if "emp_logged_in" not in st.session_state: st.session_state.emp_logged_in = None
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [{"role": "assistant", "content": "¡Hola! Soy Jael. Puedes hablarme o escribirme. Dime si necesitas registrar un gasto."}]
+    st.session_state.chat_history = [{"role": "assistant", "content": "¡Hola! Soy Jael. Puedes hablarme o escribirme."}]
 
-# Herramienta para Jael
 herramientas = [
     {
         "type": "function",
@@ -62,7 +56,7 @@ herramientas = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "categoria": {"type": "string", "enum": ["Desayunos de fin de semana", "Insumos de Limpieza", "Mantenimiento / Cuarto", "Proveedores (Pedidos fijos)", "Otros Gastos Extra"]},
+                    "categoria": {"type": "string", "enum": ["Desayunos de fin de semana", "Insumos de Limpieza", "Mantenimiento / Cuarto", "Proveedores", "Otros Gastos Extra"]},
                     "descripcion": {"type": "string"},
                     "monto": {"type": "number"}
                 },
@@ -72,27 +66,24 @@ herramientas = [
     }
 ]
 
-# --- NAVEGACIÓN PRINCIPAL ---
 st.sidebar.title("Acceso")
 tipo_acceso = st.sidebar.radio("Selecciona tu perfil:", ["Área de Empleados", "Administración"])
 
 # ==========================================
-# VISTA: ÁREA DE EMPLEADOS
+# ÁREA DE EMPLEADOS
 # ==========================================
 if tipo_acceso == "Área de Empleados":
     st.title("⏱️ Reloj Checador")
     
-    # Descargar empleados de la base de datos
-    respuesta_emp = supabase.table("empleados").select("*").execute()
-    lista_empleados = respuesta_emp.data
+    try:
+        lista_empleados = supabase.table("empleados").select("*").execute().data
+    except Exception:
+        lista_empleados = []
     
     if st.session_state.emp_logged_in is None:
-        st.write("Por favor, identifícate para marcar tu entrada o salida.")
-        
         if not lista_empleados:
-            st.warning("No hay empleados registrados. Pídele al administrador que te registre.")
+            st.warning("No hay empleados registrados.")
         else:
-            # Crear diccionario de Nombre -> PIN
             nombres = [e["nombre"] for e in lista_empleados]
             dic_emp = {e["nombre"]: e["pin"] for e in lista_empleados}
             
@@ -103,18 +94,15 @@ if tipo_acceso == "Área de Empleados":
                     st.session_state.emp_logged_in = emp_sel
                     st.rerun()
                 else:
-                    st.error("PIN incorrecto. Intenta de nuevo.")
+                    st.error("PIN incorrecto.")
     else:
         emp = st.session_state.emp_logged_in
         st.success(f"Hola, **{emp}**")
-        
         if st.button("Cerrar mi sesión"):
             st.session_state.emp_logged_in = None
             st.rerun()
             
         st.write("---")
-        
-        # Geolocalización
         st.write("### 📍 Verificación de Ubicación")
         loc = streamlit_geolocation()
         ubicacion_valida = False
@@ -125,28 +113,23 @@ if tipo_acceso == "Área de Empleados":
             distancia = calcular_distancia(LAT_SINAGOGA, LON_SINAGOGA, lat_emp, lon_emp)
             
             if distancia <= RADIO_PERMITIDO_METROS:
-                st.success(f"✅ Ubicación confirmada (Estás a {int(distancia)}m)")
+                st.success(f"✅ Ubicación confirmada")
                 ubicacion_valida = True
             else:
-                st.error(f"❌ Estás muy lejos de la sinagoga (Estás a {int(distancia)}m). Debes estar a menos de {int(RADIO_PERMITIDO_METROS)}m.")
+                st.error("❌ Estás muy lejos de la sinagoga.")
         
         st.write("---")
         
-        # Revisar si hay un turno abierto de este empleado en la base de datos
-        respuesta_turnos = supabase.table("asistencia").select("*").eq("empleado", emp).is_("salida", "null").execute()
-        turno_abierto = respuesta_turnos.data
+        try:
+            turno_abierto = supabase.table("asistencia").select("*").eq("empleado", emp).is_("salida", "null").execute().data
+        except Exception:
+            turno_abierto = []
         
         col1, col2 = st.columns(2)
         with col1:
             if not turno_abierto:
                 if st.button("🟢 MARCAR ENTRADA", use_container_width=True, disabled=not ubicacion_valida):
-                    nuevo_registro = {
-                        "empleado": emp,
-                        "fecha": datetime.now().strftime("%Y-%m-%d"),
-                        "entrada": datetime.now().strftime("%H:%M:%S"),
-                        "horas": 0.0
-                    }
-                    supabase.table("asistencia").insert(nuevo_registro).execute()
+                    supabase.table("asistencia").insert({"empleado": emp, "fecha": datetime.now().strftime("%Y-%m-%d"), "entrada": datetime.now().strftime("%H:%M:%S"), "horas": 0.0}).execute()
                     st.rerun()
             else:
                 st.button("🟢 ENTRADA REGISTRADA", disabled=True, use_container_width=True)
@@ -155,148 +138,100 @@ if tipo_acceso == "Área de Empleados":
             if turno_abierto:
                 if st.button("🔴 MARCAR SALIDA", use_container_width=True, disabled=not ubicacion_valida):
                     id_turno = turno_abierto[0]["id"]
-                    hora_salida = datetime.now()
-                    str_salida = hora_salida.strftime("%H:%M:%S")
-                    str_entrada = turno_abierto[0]["entrada"]
-                    fecha = turno_abierto[0]["fecha"]
-                    
-                    fmt = "%Y-%m-%d %H:%M:%S"
-                    t_in = datetime.strptime(f"{fecha} {str_entrada}", fmt)
-                    horas_trabajadas = (hora_salida - t_in).total_seconds() / 3600.0
-                    
-                    # Actualizar en Supabase
-                    supabase.table("asistencia").update({"salida": str_salida, "horas": round(horas_trabajadas, 2)}).eq("id", id_turno).execute()
+                    h_salida = datetime.now()
+                    t_in = datetime.strptime(f"{turno_abierto[0]['fecha']} {turno_abierto[0]['entrada']}", "%Y-%m-%d %H:%M:%S")
+                    horas_trabajadas = (h_salida - t_in).total_seconds() / 3600.0
+                    supabase.table("asistencia").update({"salida": h_salida.strftime("%H:%M:%S"), "horas": round(horas_trabajadas, 2)}).eq("id", id_turno).execute()
                     st.rerun()
             else:
                 st.button("🔴 MARCAR SALIDA", disabled=True, use_container_width=True)
                 
         st.write("### 📅 Mis horas trabajadas")
-        respuesta_horas = supabase.table("asistencia").select("*").eq("empleado", emp).execute()
-        if respuesta_horas.data:
-            df_emp = pd.DataFrame(respuesta_horas.data)
-            st.dataframe(df_emp[["fecha", "entrada", "salida", "horas"]], use_container_width=True)
-            st.info(f"**Total acumulado:** {df_emp['horas'].sum():.2f} horas")
-        else:
-            st.info("Aún no tienes registros de horas.")
+        try:
+            mis_horas = supabase.table("asistencia").select("*").eq("empleado", emp).execute().data
+            if mis_horas:
+                st.dataframe(pd.DataFrame(mis_horas)[["fecha", "entrada", "salida", "horas"]], use_container_width=True)
+        except Exception:
+            st.info("Aún no tienes registros.")
 
 # ==========================================
-# VISTA: ADMINISTRACIÓN
+# ADMINISTRACIÓN
 # ==========================================
 elif tipo_acceso == "Administración":
     if not st.session_state.admin_logged_in:
-        st.title("🔐 Acceso Administrativo")
-        pwd = st.text_input("Contraseña de Administrador", type="password")
-        if st.button("Entrar"):
-            if pwd == "admin123": 
-                st.session_state.admin_logged_in = True
-                st.rerun()
-            else:
-                st.error("Contraseña incorrecta.")
+        pwd = st.text_input("Contraseña Admin", type="password")
+        if st.button("Entrar") and pwd == "admin123": 
+            st.session_state.admin_logged_in = True
+            st.rerun()
     else:
-        st.sidebar.markdown("---")
-        if st.sidebar.button("Cerrar Sesión Admin"):
+        if st.sidebar.button("Cerrar Sesión"):
             st.session_state.admin_logged_in = False
             st.rerun()
             
-        opcion_admin = st.sidebar.radio("Módulo:", ["Dashboard Principal", "🤖 Asistente Inteligente", "Personal y Planilla", "Salidas y Reportes"])
+        op = st.sidebar.radio("Módulo:", ["Dashboard", "🤖 Asistente", "Personal", "Gastos"])
 
-        # Descargar datos globales para el admin
-        res_gastos = supabase.table("gastos").select("*").execute()
-        res_horas = supabase.table("asistencia").select("*").execute()
-        datos_gastos = res_gastos.data
-        datos_horas = res_horas.data
+        try:
+            datos_gastos = supabase.table("gastos").select("*").execute().data
+            datos_horas = supabase.table("asistencia").select("*").execute().data
+        except Exception:
+            datos_gastos, datos_horas = [], []
 
-        if opcion_admin == "Dashboard Principal":
-            st.title("🕌 Jael - Panel de Control")
-            total_gastos = sum(g["monto"] for g in datos_gastos) if datos_gastos else 0
-            total_horas_todas = sum(t["horas"] for t in datos_horas) if datos_horas else 0
-            total_nomina = total_horas_todas * 20.0 # Tarifa de $20
+        if op == "Dashboard":
+            st.title("🕌 Panel de Control")
+            tot_g = sum(g["monto"] for g in datos_gastos) if datos_gastos else 0
+            tot_h = sum(t["horas"] for t in datos_horas) if datos_horas else 0
             
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric(label="💰 Gastos Extra", value=f"${total_gastos:,.2f}")
-            col2.metric(label="👥 Nómina Acumulada", value=f"${total_nomina:,.2f}")
-            col3.metric(label="🏢 TOTAL OPERACIÓN", value=f"${(total_gastos + total_nomina):,.2f}")
-            col4.metric(label="👷 Horas Registradas", value=f"{total_horas_todas:.1f}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("💰 Gastos Extra", f"${tot_g:,.2f}")
+            c2.metric("👥 Nómina", f"${tot_h*20:,.2f}")
+            c3.metric("🏢 TOTAL OPERACIÓN", f"${(tot_g + tot_h*20):,.2f}")
+            c4.metric("👷 Horas Registradas", f"{tot_h:.1f}")
 
-        elif opcion_admin == "🤖 Asistente Inteligente":
-            st.title("🎙️ Asistente Inteligente")
+        elif op == "🤖 Asistente":
+            st.title("🎙️ Jael")
             for msg in st.session_state.chat_history:
                 if msg["role"] != "system" and msg.get("content"):
-                    with st.chat_message(msg["role"]):
-                        st.write(msg["content"])
+                    st.chat_message(msg["role"]).write(msg["content"])
 
-            audio_value = st.audio_input("Grabar mensaje de voz", key="audio_recorder")
-            texto_usuario = st.chat_input("O escribe tu instrucción...")
-            mensaje_final = texto_usuario
-
-            if not mensaje_final and audio_value is not None and st.session_state.get("last_audio") != audio_value:
-                with st.spinner("Escuchando..."):
-                    with open("temp.wav", "wb") as f: f.write(audio_value.getbuffer())
-                    transcription = client.audio.transcriptions.create(model="whisper-1", file=open("temp.wav", "rb"))
-                    mensaje_final = transcription.text
-                    st.success(f"**Escuché:** {mensaje_final}")
-                    st.session_state.last_audio = audio_value
-
-            if mensaje_final:
-                st.session_state.chat_history.append({"role": "user", "content": mensaje_final})
-                with st.spinner("Jael está analizando..."):
-                    mensajes_api = [{"role": "system", "content": "Eres Jael, asistente de la sinagoga."}]
-                    mensajes_api.extend([{"role": m["role"], "content": m.get("content", "")} for m in st.session_state.chat_history])
-                    response = client.chat.completions.create(model="gpt-3.5-turbo", messages=mensajes_api, tools=herramientas, tool_choice="auto")
-                    mensaje_respuesta = response.choices[0].message
-                    if getattr(mensaje_respuesta, "tool_calls", None):
-                        for tool_call in mensaje_respuesta.tool_calls:
-                            if tool_call.function.name == "registrar_gasto":
-                                args = json.loads(tool_call.function.arguments)
-                                # Guardar gasto en Supabase
-                                supabase.table("gastos").insert({
-                                    "fecha": datetime.now().strftime("%Y-%m-%d"), 
-                                    "categoria": args["categoria"], 
-                                    "descripcion": args["descripcion"], 
-                                    "monto": args["monto"]
-                                }).execute()
-                                st.session_state.chat_history.append({"role": "assistant", "content": f"✅ Gasto registrado en la base de datos permanente: ${args['monto']} en {args['categoria']}."})
-                    else:
-                        st.session_state.chat_history.append({"role": "assistant", "content": getattr(mensaje_respuesta, "content", "Entendido.")})
+            texto_usuario = st.chat_input("Escribe tu instrucción...")
+            if texto_usuario:
+                st.session_state.chat_history.append({"role": "user", "content": texto_usuario})
+                mensajes = [{"role": "system", "content": "Eres Jael, asistente de la sinagoga."}] + st.session_state.chat_history
+                
+                resp = client.chat.completions.create(model="gpt-3.5-turbo", messages=mensajes, tools=herramientas, tool_choice="auto").choices[0].message
+                if getattr(resp, "tool_calls", None):
+                    for tc in resp.tool_calls:
+                        if tc.function.name == "registrar_gasto":
+                            args = json.loads(tc.function.arguments)
+                            supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": args["categoria"], "descripcion": args["descripcion"], "monto": args["monto"]}).execute()
+                            st.session_state.chat_history.append({"role": "assistant", "content": f"✅ Guardado en nube: ${args['monto']} en {args['categoria']}."})
+                else:
+                    st.session_state.chat_history.append({"role": "assistant", "content": getattr(resp, "content", "Entendido.")})
                 st.rerun()
 
-        elif opcion_admin == "Personal y Planilla":
-            st.title("👥 Control de Empleados")
-            with st.form("nuevo_emp_form"):
-                col1, col2 = st.columns(2)
-                with col1: nuevo_nombre = st.text_input("Nombre Completo")
-                with col2: nuevo_pin = st.text_input("Crear PIN (4 dígitos)", max_chars=4)
-                if st.form_submit_button("Añadir Empleado") and nuevo_nombre and nuevo_pin:
-                    # Guardar empleado en Supabase
-                    supabase.table("empleados").insert({"nombre": nuevo_nombre, "pin": nuevo_pin}).execute()
-                    st.success(f"✅ {nuevo_nombre} añadido a la base de datos.")
-            
-            st.write("---")
+        elif op == "Personal":
+            st.title("👥 Empleados")
+            with st.form("f1"):
+                c1, c2 = st.columns(2)
+                nombre = c1.text_input("Nombre")
+                pin = c2.text_input("PIN (4 dígitos)", max_chars=4)
+                if st.form_submit_button("Añadir") and nombre and pin:
+                    supabase.table("empleados").insert({"nombre": nombre, "pin": pin}).execute()
+                    st.success("✅ Añadido a la nube.")
             if datos_horas:
-                df_global = pd.DataFrame(datos_horas)
-                df_global["pago ($)"] = df_global["horas"] * 20.0
-                st.dataframe(df_global[["empleado", "fecha", "entrada", "salida", "horas", "pago ($)"]], use_container_width=True)
-            else:
-                st.info("Nadie ha registrado horas todavía.")
+                df = pd.DataFrame(datos_horas)
+                df["pago"] = df["horas"] * 20.0
+                st.dataframe(df[["empleado", "fecha", "entrada", "salida", "horas", "pago"]], use_container_width=True)
 
-        elif opcion_admin == "Salidas y Reportes":
-            st.title("📈 Gastos y Salidas")
-            with st.form("registro_gasto"):
-                col1, col2, col3 = st.columns(3)
-                with col1: categoria = st.selectbox("Categoría", ["Desayunos de fin de semana", "Insumos de Limpieza", "Mantenimiento / Cuarto", "Proveedores (Pedidos fijos)", "Otros Gastos Extra"])
-                with col2: descripcion = st.text_input("Descripción")
-                with col3: monto = st.number_input("Monto ($)", min_value=0.0, step=1.0)
-                if st.form_submit_button("Guardar Gasto") and descripcion and monto > 0:
-                    supabase.table("gastos").insert({
-                        "fecha": datetime.now().strftime("%Y-%m-%d"), 
-                        "categoria": categoria, 
-                        "descripcion": descripcion, 
-                        "monto": monto
-                    }).execute()
+        elif op == "Gastos":
+            st.title("📈 Gastos")
+            with st.form("f2"):
+                c1, c2, c3 = st.columns(3)
+                cat = c1.selectbox("Categoría", ["Limpieza", "Proveedores", "Otros"])
+                desc = c2.text_input("Descripción")
+                monto = c3.number_input("Monto ($)", min_value=0.0)
+                if st.form_submit_button("Guardar") and desc and monto > 0:
+                    supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": cat, "descripcion": desc, "monto": monto}).execute()
                     st.success("✅ Guardado en la nube.")
-
             if datos_gastos:
-                df_gastos = pd.DataFrame(datos_gastos)
-                col1, col2 = st.columns([1, 1])
-                with col1: st.dataframe(df_gastos[["fecha", "categoria", "descripcion", "monto"]], use_container_width=True)
-                with col2: st.altair_chart(alt.Chart(df_gastos.groupby("categoria")["monto"].sum().reset_index()).mark_bar().encode(x='categoria', y='monto', color=alt.Color('categoria', legend=None)).properties(height=300), use_container_width=True)
+                st.dataframe(pd.DataFrame(datos_gastos)[["fecha", "categoria", "descripcion", "monto"]], use_container_width=True)
