@@ -16,4 +16,4 @@ altair
 openai
 openpyxl
 streamlit-geolocation
-supabase
+st-supabase-connection
