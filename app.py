@@ -6,7 +6,7 @@ from datetime import datetime
 from openai import OpenAI
 import math
 from streamlit_geolocation import streamlit_geolocation
-from st_supabase_connection import SupabaseConnection
+from supabase import create_client, Client
 
 # Configuración inicial 
 st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide", initial_sidebar_state="auto")
@@ -23,7 +23,14 @@ st.markdown(ocultar_menu, unsafe_allow_html=True)
 
 # --- CONEXIONES ---
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-supabase = st.connection("supabase", type=SupabaseConnection)
+
+@st.cache_resource
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_connection()
 
 # --- GEOLOCALIZACIÓN ---
 LAT_SINAGOGA = 25.7617 
@@ -220,7 +227,6 @@ elif tipo_acceso == "Administración":
         elif op == "Personal":
             st.title("👥 Empleados")
             
-            # Tabla de empleados existentes
             try:
                 emp_data = supabase.table("empleados").select("*").execute().data
                 if emp_data:
