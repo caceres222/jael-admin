@@ -11,34 +11,15 @@ from supabase import create_client, Client
 # Configuración inicial 
 st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide", initial_sidebar_state="auto")
 
-# TRUCO CSS
 ocultar_menu = """
     <style>
-    /* Ocultar elementos de Streamlit/GitHub */
     #MainMenu {visibility: hidden;}
     .stAppDeployButton {display:none;}
     footer {visibility: hidden;}
-    
-    /* HACER MÁS GRANDES LOS BOTONES Y MENÚS PARA CELULAR */
-    /* Separación de las opciones del menú de radio */
-    .stRadio > div {
-        gap: 20px; /* Más espacio entre opciones */
-    }
-    /* Hacer el texto de las opciones más grande */
-    .stRadio p {
-        font-size: 20px !important;
-        padding-top: 5px;
-    }
-    /* Hacer el circulito del botón más grande */
-    .stRadio [data-baseweb="radio"] div {
-        height: 24px;
-        width: 24px;
-    }
-    
-    /* Hacer la letra de los selectbox (menú desplegable) más grande */
-    .stSelectbox p {
-        font-size: 18px !important;
-    }
+    .stRadio > div { gap: 20px; }
+    .stRadio p { font-size: 20px !important; padding-top: 5px; }
+    .stRadio [data-baseweb="radio"] div { height: 24px; width: 24px; }
+    .stSelectbox p { font-size: 18px !important; }
     </style>
 """
 st.markdown(ocultar_menu, unsafe_allow_html=True)
@@ -48,7 +29,6 @@ client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 @st.cache_resource
 def init_connection():
-    # Detector automático de secretos (busca la llave normal o dentro de connections)
     try:
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
@@ -78,8 +58,9 @@ def calcular_distancia(lat1, lon1, lat2, lon2):
 if "admin_logged_in" not in st.session_state: st.session_state.admin_logged_in = False
 if "emp_logged_in" not in st.session_state: st.session_state.emp_logged_in = None
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [{"role": "assistant", "content": "¡Hola! Soy Jael. Puedes hablarme o escribirme."}]
+    st.session_state.chat_history = [{"role": "assistant", "content": "¡Hola! Soy Jael. Puedes hablarme o escribirme. Puedo registrar gastos y ahora también puedo consultar las finanzas y la asistencia del personal."}]
 
+# --- HERRAMIENTAS DE JAEL ---
 herramientas = [
     {
         "type": "function",
@@ -89,12 +70,28 @@ herramientas = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "categoria": {"type": "string", "enum": ["Desayunos de fin de semana", "Insumos de Limpieza", "Mantenimiento / Cuarto", "Proveedores", "Otros Gastos Extra"]},
+                    "categoria": {"type": "string", "enum": ["Limpieza", "Proveedores", "Otros"]},
                     "descripcion": {"type": "string"},
                     "monto": {"type": "number"}
                 },
                 "required": ["categoria", "descripcion", "monto"]
             }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_gastos",
+            "description": "Devuelve la lista completa de gastos registrados en la base de datos para que puedas responderle al usuario sobre totales o detalles.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_horas",
+            "description": "Devuelve el registro de asistencias y horas trabajadas de los empleados para que puedas calcular su nómina o revisar quién vino a trabajar.",
+            "parameters": {"type": "object", "properties": {}}
         }
     }
 ]
@@ -235,7 +232,7 @@ elif tipo_acceso == "Administración":
             texto_usuario = st.chat_input("Escribe tu instrucción...")
             if texto_usuario:
                 st.session_state.chat_history.append({"role": "user", "content": texto_usuario})
-                mensajes = [{"role": "system", "content": "Eres Jael, asistente de la sinagoga."}] + st.session_state.chat_history
+                mensajes = [{"role": "system", "content": f"Eres Jael, asistente de la sinagoga. Hoy es {datetime.now().strftime('%Y-%m-%d')}."}] + st.session_state.chat_history
                 
                 resp = client.chat.completions.create(model="gpt-3.5-turbo", messages=mensajes, tools=herramientas, tool_choice="auto").choices[0].message
                 if getattr(resp, "tool_calls", None):
@@ -244,16 +241,33 @@ elif tipo_acceso == "Administración":
                             args = json.loads(tc.function.arguments)
                             try:
                                 supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": args["categoria"], "descripcion": args["descripcion"], "monto": args["monto"]}).execute()
-                                st.session_state.chat_history.append({"role": "assistant", "content": f"✅ Guardado en nube: ${args['monto']} en {args['categoria']}."})
+                                st.session_state.chat_history.append({"role": "assistant", "content": f"✅ Gasto registrado: ${args['monto']} en {args['categoria']}."})
                             except Exception as e:
-                                st.session_state.chat_history.append({"role": "assistant", "content": f"❌ Error al guardar el gasto: {e}"})
+                                st.session_state.chat_history.append({"role": "assistant", "content": f"❌ Error al guardar: {e}"})
+                        
+                        elif tc.function.name == "consultar_gastos":
+                            try:
+                                gastos_db = supabase.table("gastos").select("*").execute().data
+                                mens = [{"role": "system", "content": "Eres Jael. Analiza esta lista de gastos y responde al usuario de forma clara, natural y amable: " + json.dumps(gastos_db)}] + st.session_state.chat_history
+                                resp_analisis = client.chat.completions.create(model="gpt-3.5-turbo", messages=mens).choices[0].message
+                                st.session_state.chat_history.append({"role": "assistant", "content": resp_analisis.content})
+                            except Exception as e:
+                                st.session_state.chat_history.append({"role": "assistant", "content": "Hubo un problema leyendo la base de datos."})
+                                
+                        elif tc.function.name == "consultar_horas":
+                            try:
+                                horas_db = supabase.table("asistencia").select("*").execute().data
+                                mens = [{"role": "system", "content": "Eres Jael. Analiza esta lista de asistencias (sabiendo que pagamos $20 la hora) y responde al usuario de forma natural: " + json.dumps(horas_db)}] + st.session_state.chat_history
+                                resp_analisis = client.chat.completions.create(model="gpt-3.5-turbo", messages=mens).choices[0].message
+                                st.session_state.chat_history.append({"role": "assistant", "content": resp_analisis.content})
+                            except Exception as e:
+                                st.session_state.chat_history.append({"role": "assistant", "content": "Hubo un problema leyendo la base de datos."})
                 else:
                     st.session_state.chat_history.append({"role": "assistant", "content": getattr(resp, "content", "Entendido.")})
                 st.rerun()
 
         elif op == "Personal":
             st.title("👥 Empleados")
-            
             try:
                 emp_data = supabase.table("empleados").select("*").execute().data
                 if emp_data:
@@ -261,7 +275,6 @@ elif tipo_acceso == "Administración":
                     st.dataframe(pd.DataFrame(emp_data))
             except Exception:
                 pass
-                
             st.write("---")
             with st.form("f1"):
                 st.write("**Añadir Nuevo Empleado**")
@@ -271,19 +284,14 @@ elif tipo_acceso == "Administración":
                 if st.form_submit_button("Añadir") and nombre and pin:
                     try:
                         supabase.table("empleados").insert({"nombre": nombre, "pin": pin}).execute()
-                        st.success(f"✅ {nombre} añadido a la nube.")
+                        st.success(f"✅ Añadido")
                         st.rerun()
                     except Exception as e:
-                        if "duplicate key" in str(e).lower() or "23505" in str(e):
-                            st.error("❌ Ese nombre de empleado ya existe.")
-                        else:
-                            st.error(f"❌ Detalles del error: {str(e)}")
-                            
+                        st.error("Error al añadir")
             st.write("---")
             if datos_horas:
                 df = pd.DataFrame(datos_horas)
                 df["pago"] = df["horas"] * 20.0
-                st.write("**Registro de Horas Global:**")
                 st.dataframe(df[["empleado", "fecha", "entrada", "salida", "horas", "pago"]], use_container_width=True)
 
         elif op == "Gastos":
@@ -294,12 +302,8 @@ elif tipo_acceso == "Administración":
                 desc = c2.text_input("Descripción")
                 monto = c3.number_input("Monto ($)", min_value=0.0)
                 if st.form_submit_button("Guardar") and desc and monto > 0:
-                    try:
-                        supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": cat, "descripcion": desc, "monto": monto}).execute()
-                        st.success("✅ Guardado en la nube.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error al guardar: {str(e)}")
-            
+                    supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": cat, "descripcion": desc, "monto": monto}).execute()
+                    st.success("✅ Guardado")
+                    st.rerun()
             if datos_gastos:
                 st.dataframe(pd.DataFrame(datos_gastos)[["fecha", "categoria", "descripcion", "monto"]], use_container_width=True)
