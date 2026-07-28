@@ -8,6 +8,7 @@ import math
 import io
 from streamlit_geolocation import streamlit_geolocation
 from supabase import create_client, Client
+from streamlit_mic_recorder import mic_recorder
 
 # Configuración inicial 
 st.set_page_config(page_title="Jael - Asistente de la Sinagoga", page_icon="🕌", layout="wide", initial_sidebar_state="auto")
@@ -64,7 +65,7 @@ RADIO_PERMITIDO_METROS = 200.0
 if "admin_logged_in" not in st.session_state: st.session_state.admin_logged_in = False
 if "emp_logged_in" not in st.session_state: st.session_state.emp_logged_in = None
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [{"role": "assistant", "content": "¡Hola! Soy Jael. Puedo registrar gastos y ahora también puedo consultar finanzas y horas del personal."}]
+    st.session_state.chat_history = [{"role": "assistant", "content": "¡Hola! Soy Jael. Puedo registrar gastos y consultar finanzas o asistencia. Presiona el micrófono para hablarme."}]
 
 herramientas = [
     {
@@ -141,15 +142,18 @@ if tipo_acceso == "Área de Empleados":
         st.write("### 📍 Verificación de Ubicación")
         loc = streamlit_geolocation()
         
-        # EL GPS AHORA SOLO ADVIERTE, NO BLOQUEA (Para que puedas hacer pruebas desde casa)
+        ubicacion_valida = False
+        
+        # AHORA SÍ BLOQUEA EL GPS ESTRICTAMENTE COMO PEDISTE
         if loc and loc.get("latitude") and loc.get("longitude"):
             lat_emp = loc["latitude"]
             lon_emp = loc["longitude"]
             distancia = calcular_distancia(LAT_SINAGOGA, LON_SINAGOGA, lat_emp, lon_emp)
             if distancia <= RADIO_PERMITIDO_METROS:
                 st.success(f"✅ Ubicación confirmada en Sinagoga.")
+                ubicacion_valida = True
             else:
-                st.warning(f"⚠️ Aviso: Estás a {int(distancia)}m de la sinagoga.")
+                st.error(f"❌ Estás muy lejos de la sinagoga (Estás a {int(distancia)}m).")
         
         st.write("---")
         
@@ -160,7 +164,7 @@ if tipo_acceso == "Área de Empleados":
         
         if not turno_abierto:
             st.write("¿Listo para comenzar a trabajar?")
-            if st.button("🟢 MARCAR ENTRADA", use_container_width=True):
+            if st.button("🟢 MARCAR ENTRADA", use_container_width=True, disabled=not ubicacion_valida):
                 try:
                     supabase.table("asistencia").insert({"empleado": emp, "fecha": datetime.now().strftime("%Y-%m-%d"), "entrada": datetime.now().strftime("%H:%M:%S"), "horas": 0.0}).execute()
                     st.rerun()
@@ -174,7 +178,8 @@ if tipo_acceso == "Área de Empleados":
                 actividades = st.text_area("¿Qué actividades realizaste en este turno?", placeholder="Ej: Limpieza del salón principal, organización de sillas...")
                 es_extra = st.checkbox("🔥 Marcar este turno como HORAS EXTRAS")
                 
-                if st.form_submit_button("🔴 GUARDAR Y MARCAR SALIDA"):
+                # El botón de salida también está bloqueado por el GPS
+                if st.form_submit_button("🔴 GUARDAR Y MARCAR SALIDA", disabled=not ubicacion_valida):
                     if not actividades:
                         st.error("Por favor, escribe tus actividades antes de salir.")
                     else:
@@ -243,9 +248,24 @@ elif tipo_acceso == "Administración":
                 if msg["role"] != "system" and msg.get("content"):
                     st.chat_message(msg["role"]).write(msg["content"])
 
-            texto_usuario = st.chat_input("Escribe tu instrucción...")
-            if texto_usuario:
-                st.session_state.chat_history.append({"role": "user", "content": texto_usuario})
+            texto_usuario = st.chat_input("O escribe tu instrucción aquí...")
+            mensaje_final = texto_usuario
+
+            # NUEVO GRABADOR DE VOZ (COMPATIBLE CON CELULAR)
+            audio = mic_recorder(start_prompt="🎙️ Toca para Hablar", stop_prompt="⏹️ Detener Grabación", just_once=True, key="grabador")
+            
+            if audio and not texto_usuario:
+                with st.spinner("Escuchando..."):
+                    # Convertir el audio capturado a archivo WAV
+                    with open("temp.wav", "wb") as f: 
+                        f.write(audio['bytes'])
+                    # Enviar a OpenAI Whisper para transcribir
+                    transcription = client.audio.transcriptions.create(model="whisper-1", file=open("temp.wav", "rb"))
+                    mensaje_final = transcription.text
+                    st.success(f"**Escuché:** {mensaje_final}")
+
+            if mensaje_final:
+                st.session_state.chat_history.append({"role": "user", "content": mensaje_final})
                 mensajes = [{"role": "system", "content": f"Eres Jael. Hoy es {datetime.now().strftime('%Y-%m-%d')}."}] + st.session_state.chat_history
                 
                 resp = client.chat.completions.create(model="gpt-3.5-turbo", messages=mensajes, tools=herramientas, tool_choice="auto").choices[0].message
@@ -295,13 +315,9 @@ elif tipo_acceso == "Administración":
             st.write("---")
             if datos_horas:
                 df = pd.DataFrame(datos_horas)
-                
-                # Asumimos que las horas extra se pagan distinto? Por ahora $20 todas. 
                 df["pago_estimado"] = df["horas"] * 20.0
-                
                 st.write("### 📋 Registro de Actividades y Nómina")
                 
-                # Botón Excel
                 cols_excel = ["empleado", "fecha", "entrada", "salida", "horas", "si_es_extra", "actividad", "pago_estimado"]
                 if set(cols_excel).issubset(df.columns):
                     excel_data = generar_excel(df[cols_excel], "Nomina_Actividades")
