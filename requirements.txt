@@ -5,3 +5,11 @@ openai
 openpyxl
 streamlit-geolocation
 supabase
+streamlit
+pandas
+altair
+openai
+openpyxl
+streamlit-geolocation
+supabase
+streamlit-mic-recorder
