@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 from openai import OpenAI
 import math
+import io
 from streamlit_geolocation import streamlit_geolocation
 from supabase import create_client, Client
 
@@ -39,11 +40,7 @@ def init_connection():
 
 supabase = init_connection()
 
-# --- GEOLOCALIZACIÓN ---
-LAT_SINAGOGA = 25.7617 
-LON_SINAGOGA = -80.1918 
-RADIO_PERMITIDO_METROS = 200.0 
-
+# --- FUNCIONES AUXILIARES ---
 def calcular_distancia(lat1, lon1, lat2, lon2):
     R = 6371000 
     phi_1 = math.radians(lat1)
@@ -53,6 +50,16 @@ def calcular_distancia(lat1, lon1, lat2, lon2):
     a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi_1) * math.cos(phi_2) * math.sin(delta_lambda / 2.0) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
+
+def generar_excel(dataframe, sheet_name="Reporte"):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        dataframe.to_excel(writer, index=False, sheet_name=sheet_name)
+    return output.getvalue()
+
+LAT_SINAGOGA = 25.7617 
+LON_SINAGOGA = -80.1918 
+RADIO_PERMITIDO_METROS = 200.0 
 
 # --- ESTADOS ---
 if "admin_logged_in" not in st.session_state: st.session_state.admin_logged_in = False
@@ -82,7 +89,7 @@ herramientas = [
         "type": "function",
         "function": {
             "name": "consultar_gastos",
-            "description": "Devuelve la lista completa de gastos registrados en la base de datos para que puedas responderle al usuario sobre totales o detalles.",
+            "description": "Devuelve la lista completa de gastos registrados en la base de datos.",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -90,7 +97,7 @@ herramientas = [
         "type": "function",
         "function": {
             "name": "consultar_horas",
-            "description": "Devuelve el registro de asistencias y horas trabajadas de los empleados para que puedas calcular su nómina o revisar quién vino a trabajar.",
+            "description": "Devuelve el registro de asistencias y horas trabajadas de los empleados.",
             "parameters": {"type": "object", "properties": {}}
         }
     }
@@ -292,6 +299,12 @@ elif tipo_acceso == "Administración":
             if datos_horas:
                 df = pd.DataFrame(datos_horas)
                 df["pago"] = df["horas"] * 20.0
+                st.write("**Registro de Horas Global:**")
+                
+                # --- BOTÓN DE DESCARGA EXCEL ---
+                excel_data = generar_excel(df[["empleado", "fecha", "entrada", "salida", "horas", "pago"]], "Nómina")
+                st.download_button(label="📥 Descargar Nómina (Excel)", data=excel_data, file_name=f"Nomina_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+                
                 st.dataframe(df[["empleado", "fecha", "entrada", "salida", "horas", "pago"]], use_container_width=True)
 
         elif op == "Gastos":
@@ -306,4 +319,10 @@ elif tipo_acceso == "Administración":
                     st.success("✅ Guardado")
                     st.rerun()
             if datos_gastos:
-                st.dataframe(pd.DataFrame(datos_gastos)[["fecha", "categoria", "descripcion", "monto"]], use_container_width=True)
+                df_gastos = pd.DataFrame(datos_gastos)
+                
+                # --- BOTÓN DE DESCARGA EXCEL ---
+                excel_gastos = generar_excel(df_gastos[["fecha", "categoria", "descripcion", "monto"]], "Gastos")
+                st.download_button(label="📥 Descargar Gastos (Excel)", data=excel_gastos, file_name=f"Gastos_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+                
+                st.dataframe(df_gastos[["fecha", "categoria", "descripcion", "monto"]], use_container_width=True)
