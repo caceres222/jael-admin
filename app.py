@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import json
-from datetime import datetime
+from datetime import datetime, time
 from openai import OpenAI
 import math
 import io
@@ -40,6 +40,50 @@ def init_connection():
     return create_client(url, key)
 
 supabase = init_connection()
+
+# --- REGLAS DE HORARIOS ---
+# 0=Lunes, 1=Martes, 2=Miércoles, 3=Jueves, 4=Viernes, 5=Sábado, 6=Domingo
+HORARIOS = {
+    0: [[time(6, 0), time(13, 0)]],
+    1: [[time(6, 0), time(13, 0)]],
+    2: [[time(6, 0), time(13, 0)], [time(15, 30), time(23, 0)]],
+    3: [[time(6, 0), time(13, 0)], [time(15, 30), time(23, 0)]],
+    4: [[time(6, 0), time(13, 0)]],
+    5: [[time(6, 0), time(15, 0)], [time(17, 0), time(23, 0)]],
+    6: [[time(6, 0), time(13, 0)]],
+}
+
+def calcular_desglose_horas(t_in, t_out):
+    weekday = t_in.weekday()
+    bloques = HORARIOS.get(weekday, [])
+    
+    total_seconds = (t_out - t_in).total_seconds()
+    normal_seconds = 0
+    llegada_tarde = False
+    
+    # Calcular cruces con horarios oficiales
+    for inicio_str, fin_str in bloques:
+        inicio = datetime.combine(t_in.date(), inicio_str)
+        fin = datetime.combine(t_in.date(), fin_str)
+        
+        # Evaluar Retardo (si llega durante el bloque oficial pero después de la hora de inicio)
+        if inicio < t_in < fin:
+            llegada_tarde = True
+            
+        # Calcular tiempo traslapado con el turno oficial (Horas normales)
+        overlap_start = max(t_in, inicio)
+        overlap_end = min(t_out, fin)
+        
+        if overlap_start < overlap_end:
+            normal_seconds += (overlap_end - overlap_start).total_seconds()
+            
+    horas_normales = normal_seconds / 3600.0
+    horas_extras = (total_seconds - normal_seconds) / 3600.0
+    
+    # Evitar negativos por márgenes de segundo
+    horas_extras = max(0, horas_extras)
+    
+    return round(horas_normales, 2), round(horas_extras, 2), llegada_tarde
 
 # --- FUNCIONES AUXILIARES ---
 def calcular_distancia(lat1, lon1, lat2, lon2):
@@ -96,7 +140,7 @@ herramientas = [
         "type": "function",
         "function": {
             "name": "consultar_horas",
-            "description": "Devuelve las asistencias, horas extras y actividades de los empleados.",
+            "description": "Devuelve las asistencias, horas extras y retardos.",
             "parameters": {"type": "object", "properties": {}}
         }
     }
@@ -144,7 +188,7 @@ if tipo_acceso == "Área de Empleados":
         
         ubicacion_valida = False
         
-        # AHORA SÍ BLOQUEA EL GPS ESTRICTAMENTE COMO PEDISTE
+        # MANTENEMOS EL GPS ESTRICTO
         if loc and loc.get("latitude") and loc.get("longitude"):
             lat_emp = loc["latitude"]
             lon_emp = loc["longitude"]
@@ -175,10 +219,8 @@ if tipo_acceso == "Área de Empleados":
             
             st.write("### 📝 Registrar Actividad y Salida")
             with st.form("salida_form"):
-                actividades = st.text_area("¿Qué actividades realizaste en este turno?", placeholder="Ej: Limpieza del salón principal, organización de sillas...")
-                es_extra = st.checkbox("🔥 Marcar este turno como HORAS EXTRAS")
+                actividades = st.text_area("¿Qué actividades realizaste en este turno?", placeholder="Ej: Preparación de desayunos, limpieza...")
                 
-                # El botón de salida también está bloqueado por el GPS
                 if st.form_submit_button("🔴 GUARDAR Y MARCAR SALIDA", disabled=not ubicacion_valida):
                     if not actividades:
                         st.error("Por favor, escribe tus actividades antes de salir.")
@@ -187,15 +229,19 @@ if tipo_acceso == "Área de Empleados":
                             id_turno = turno_abierto[0]["id"]
                             h_salida = datetime.now()
                             t_in = datetime.strptime(f"{turno_abierto[0]['fecha']} {turno_abierto[0]['entrada']}", "%Y-%m-%d %H:%M:%S")
-                            horas_trabajadas = (h_salida - t_in).total_seconds() / 3600.0
+                            
+                            # Magia: Calculamos automáticamente las horas normales, extras y el retardo
+                            h_norm, h_ext, hubo_retardo = calcular_desglose_horas(t_in, h_salida)
+                            total_h = h_norm + h_ext
                             
                             supabase.table("asistencia").update({
                                 "salida": h_salida.strftime("%H:%M:%S"), 
-                                "horas": round(horas_trabajadas, 2),
-                                "actividad": actividades,
-                                "si_es_extra": es_extra
+                                "horas": round(total_h, 2),
+                                "horas_extras": h_ext,
+                                "retardo": hubo_retardo,
+                                "actividad": actividades
                             }).eq("id", id_turno).execute()
-                            st.success("✅ Salida registrada exitosamente.")
+                            st.success("✅ Salida registrada exitosamente. Tus horas extras se calcularon solas.")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al marcar salida: {e}")
@@ -205,7 +251,9 @@ if tipo_acceso == "Área de Empleados":
             mis_horas = supabase.table("asistencia").select("*").eq("empleado", emp).execute().data
             if mis_horas:
                 df_mis_h = pd.DataFrame(mis_horas)
-                st.dataframe(df_mis_h[["fecha", "entrada", "salida", "horas", "si_es_extra", "actividad"]], use_container_width=True)
+                # Solo mostramos columnas que existen
+                columnas_mostrar = [c for c in ["fecha", "entrada", "salida", "horas", "horas_extras", "retardo", "actividad"] if c in df_mis_h.columns]
+                st.dataframe(df_mis_h[columnas_mostrar], use_container_width=True)
         except Exception:
             st.info("Aún no tienes registros.")
 
@@ -240,7 +288,7 @@ elif tipo_acceso == "Administración":
             c1.metric("💰 Gastos Extra", f"${tot_g:,.2f}")
             c2.metric("👥 Nómina", f"${tot_h*20:,.2f}")
             c3.metric("🏢 TOTAL OPERACIÓN", f"${(tot_g + tot_h*20):,.2f}")
-            c4.metric("👷 Horas Registradas", f"{tot_h:.1f}")
+            c4.metric("👷 Horas Totales", f"{tot_h:.1f}")
 
         elif op == "🤖 Asistente":
             st.title("🎙️ Jael")
@@ -251,22 +299,19 @@ elif tipo_acceso == "Administración":
             texto_usuario = st.chat_input("O escribe tu instrucción aquí...")
             mensaje_final = texto_usuario
 
-            # NUEVO GRABADOR DE VOZ (COMPATIBLE CON CELULAR)
             audio = mic_recorder(start_prompt="🎙️ Toca para Hablar", stop_prompt="⏹️ Detener Grabación", just_once=True, key="grabador")
             
             if audio and not texto_usuario:
                 with st.spinner("Escuchando..."):
-                    # Convertir el audio capturado a archivo WAV
                     with open("temp.wav", "wb") as f: 
                         f.write(audio['bytes'])
-                    # Enviar a OpenAI Whisper para transcribir
                     transcription = client.audio.transcriptions.create(model="whisper-1", file=open("temp.wav", "rb"))
                     mensaje_final = transcription.text
                     st.success(f"**Escuché:** {mensaje_final}")
 
             if mensaje_final:
                 st.session_state.chat_history.append({"role": "user", "content": mensaje_final})
-                mensajes = [{"role": "system", "content": f"Eres Jael. Hoy es {datetime.now().strftime('%Y-%m-%d')}."}] + st.session_state.chat_history
+                mensajes = [{"role": "system", "content": f"Eres Jael. Hoy es {datetime.now().strftime('%A %Y-%m-%d')}."}] + st.session_state.chat_history
                 
                 resp = client.chat.completions.create(model="gpt-3.5-turbo", messages=mensajes, tools=herramientas, tool_choice="auto").choices[0].message
                 if getattr(resp, "tool_calls", None):
@@ -288,7 +333,7 @@ elif tipo_acceso == "Administración":
                         elif tc.function.name == "consultar_horas":
                             try:
                                 horas_db = supabase.table("asistencia").select("*").execute().data
-                                resp_analisis = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": "Analiza las horas (pago $20/hr, revisa si_es_extra y actividad): " + json.dumps(horas_db)}] + st.session_state.chat_history).choices[0].message
+                                resp_analisis = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": "Analiza asistencias, horas extras y retardos: " + json.dumps(horas_db)}] + st.session_state.chat_history).choices[0].message
                                 st.session_state.chat_history.append({"role": "assistant", "content": resp_analisis.content})
                             except Exception:
                                 st.session_state.chat_history.append({"role": "assistant", "content": "Error leyendo base de datos."})
@@ -315,16 +360,19 @@ elif tipo_acceso == "Administración":
             st.write("---")
             if datos_horas:
                 df = pd.DataFrame(datos_horas)
-                df["pago_estimado"] = df["horas"] * 20.0
+                
+                # Pago base total asumiendo 20.0 (puedes ajustarlo si las extras se pagan distinto)
+                if "horas" in df.columns:
+                    df["pago_estimado"] = df["horas"] * 20.0
+                
                 st.write("### 📋 Registro de Actividades y Nómina")
                 
-                cols_excel = ["empleado", "fecha", "entrada", "salida", "horas", "si_es_extra", "actividad", "pago_estimado"]
-                if set(cols_excel).issubset(df.columns):
-                    excel_data = generar_excel(df[cols_excel], "Nomina_Actividades")
-                    st.download_button(label="📥 Descargar Nómina y Actividades (Excel)", data=excel_data, file_name=f"Nomina_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
-                    st.dataframe(df[cols_excel], use_container_width=True)
-                else:
-                    st.warning("Faltan datos de actividad en registros antiguos. Los nuevos se verán aquí.")
+                # Botón Excel incluyendo las nuevas columnas
+                cols_excel = [c for c in ["empleado", "fecha", "entrada", "salida", "horas", "horas_extras", "retardo", "actividad", "pago_estimado"] if c in df.columns]
+                
+                excel_data = generar_excel(df[cols_excel], "Nomina_Actividades")
+                st.download_button(label="📥 Descargar Nómina y Actividades (Excel)", data=excel_data, file_name=f"Nomina_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+                st.dataframe(df[cols_excel], use_container_width=True)
 
         elif op == "Gastos":
             st.title("📈 Gastos")
