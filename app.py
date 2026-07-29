@@ -61,16 +61,17 @@ def calcular_desglose_horas(t_in, t_out):
     normal_seconds = 0
     llegada_tarde = False
     
-    # Calcular cruces con horarios oficiales
+    # Evaluar si la hora de entrada sobrepasa el inicio del bloque
+    if bloques:
+        # Se toma el inicio del primer bloque como referencia oficial del día
+        inicio_oficial = datetime.combine(t_in.date(), bloques[0][0])
+        if t_in > inicio_oficial:
+            llegada_tarde = True
+
     for inicio_str, fin_str in bloques:
         inicio = datetime.combine(t_in.date(), inicio_str)
         fin = datetime.combine(t_in.date(), fin_str)
         
-        # Evaluar Retardo (si llega durante el bloque oficial pero después de la hora de inicio)
-        if inicio < t_in < fin:
-            llegada_tarde = True
-            
-        # Calcular tiempo traslapado con el turno oficial (Horas normales)
         overlap_start = max(t_in, inicio)
         overlap_end = min(t_out, fin)
         
@@ -79,8 +80,6 @@ def calcular_desglose_horas(t_in, t_out):
             
     horas_normales = normal_seconds / 3600.0
     horas_extras = (total_seconds - normal_seconds) / 3600.0
-    
-    # Evitar negativos por márgenes de segundo
     horas_extras = max(0, horas_extras)
     
     return round(horas_normales, 2), round(horas_extras, 2), llegada_tarde
@@ -155,7 +154,50 @@ tipo_acceso = st.sidebar.radio("Selecciona tu perfil:", ["Área de Empleados", "
 if tipo_acceso == "Área de Empleados":
     st.title("⏱️ Reloj Checador")
     
-                   try:
+    try:
+        lista_empleados = supabase.table("empleados").select("*").execute().data
+    except Exception:
+        lista_empleados = []
+    
+    if st.session_state.emp_logged_in is None:
+        if not lista_empleados:
+            st.warning("No hay empleados registrados.")
+        else:
+            nombres = [e["nombre"] for e in lista_empleados]
+            dic_emp = {e["nombre"]: e["pin"] for e in lista_empleados}
+            
+            emp_sel = st.selectbox("Tu Nombre", nombres)
+            pin_input = st.text_input("Tu PIN (4 dígitos)", type="password", max_chars=4)
+            if st.button("Ingresar"):
+                if dic_emp.get(emp_sel) == pin_input:
+                    st.session_state.emp_logged_in = emp_sel
+                    st.rerun()
+                else:
+                    st.error("PIN incorrecto.")
+    else:
+        emp = st.session_state.emp_logged_in
+        st.success(f"Hola, **{emp}**")
+        if st.button("Cerrar mi sesión"):
+            st.session_state.emp_logged_in = None
+            st.rerun()
+            
+        st.write("---")
+        st.write("### 📍 Verificación de Ubicación")
+        loc = streamlit_geolocation()
+        
+        # MODO PRUEBA: El GPS solo avisa, no bloquea los botones.
+        if loc and loc.get("latitude") and loc.get("longitude"):
+            lat_emp = loc["latitude"]
+            lon_emp = loc["longitude"]
+            distancia = calcular_distancia(LAT_SINAGOGA, LON_SINAGOGA, lat_emp, lon_emp)
+            if distancia <= RADIO_PERMITIDO_METROS:
+                st.success(f"✅ Ubicación confirmada en Sinagoga.")
+            else:
+                st.warning(f"⚠️ Aviso: Estás a {int(distancia)}m de la sinagoga.")
+        
+        st.write("---")
+        
+        try:
             turno_abierto = supabase.table("asistencia").select("*").eq("empleado", emp).is_("salida", "null").execute().data
         except Exception:
             turno_abierto = []
@@ -176,7 +218,7 @@ if tipo_acceso == "Área de Empleados":
             if turno_abierto:
                 st.write("### 📝 Registrar Actividad y Salida")
                 with st.form("salida_form"):
-                    actividades = st.text_area("¿Qué actividades realizaste?", placeholder="Ej: Limpieza...")
+                    actividades = st.text_area("¿Qué actividades realizaste en este turno?", placeholder="Ej: Preparación de desayunos, limpieza...")
                     
                     if st.form_submit_button("🔴 GUARDAR Y MARCAR SALIDA"):
                         if not actividades:
@@ -187,6 +229,7 @@ if tipo_acceso == "Área de Empleados":
                                 h_salida = datetime.now()
                                 t_in = datetime.strptime(f"{turno_abierto[0]['fecha']} {turno_abierto[0]['entrada']}", "%Y-%m-%d %H:%M:%S")
                                 
+                                # Cálculo automático de horas
                                 h_norm, h_ext, hubo_retardo = calcular_desglose_horas(t_in, h_salida)
                                 total_h = h_norm + h_ext
                                 
@@ -197,68 +240,18 @@ if tipo_acceso == "Área de Empleados":
                                     "retardo": hubo_retardo,
                                     "actividad": actividades
                                 }).eq("id", id_turno).execute()
-                                st.success("✅ Salida registrada exitosamente.")
+                                st.success("✅ Salida registrada exitosamente. Tus horas extras se calcularon solas.")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error al marcar salida: {e}")
             else:
-                st.button("🔴 MARCAR SALIDA", disabled=True, use_container_width=True)                            except Exception as e:
-                                st.error(f"Error al marcar salida: {e}")
-            else:
-                st.button("🔴 MARCAR SALIDA", disabled=True, use_container_width=True)        
-        st.write("---")
-        
-        try:
-            turno_abierto = supabase.table("asistencia").select("*").eq("empleado", emp).is_("salida", "null").execute().data
-        except Exception:
-            turno_abierto = []
-        
-        if not turno_abierto:
-            st.write("¿Listo para comenzar a trabajar?")
-            if st.button("🟢 MARCAR ENTRADA", use_container_width=True, disabled=not ubicacion_valida):
-                try:
-                    supabase.table("asistencia").insert({"empleado": emp, "fecha": datetime.now().strftime("%Y-%m-%d"), "entrada": datetime.now().strftime("%H:%M:%S"), "horas": 0.0}).execute()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al marcar entrada: {e}")
-        else:
-            st.info(f"🟢 Tienes un turno abierto. Entraste a las {turno_abierto[0]['entrada']}.")
-            
-            st.write("### 📝 Registrar Actividad y Salida")
-            with st.form("salida_form"):
-                actividades = st.text_area("¿Qué actividades realizaste en este turno?", placeholder="Ej: Preparación de desayunos, limpieza...")
-                
-                if st.form_submit_button("🔴 GUARDAR Y MARCAR SALIDA", disabled=not ubicacion_valida):
-                    if not actividades:
-                        st.error("Por favor, escribe tus actividades antes de salir.")
-                    else:
-                        try:
-                            id_turno = turno_abierto[0]["id"]
-                            h_salida = datetime.now()
-                            t_in = datetime.strptime(f"{turno_abierto[0]['fecha']} {turno_abierto[0]['entrada']}", "%Y-%m-%d %H:%M:%S")
-                            
-                            # Magia: Calculamos automáticamente las horas normales, extras y el retardo
-                            h_norm, h_ext, hubo_retardo = calcular_desglose_horas(t_in, h_salida)
-                            total_h = h_norm + h_ext
-                            
-                            supabase.table("asistencia").update({
-                                "salida": h_salida.strftime("%H:%M:%S"), 
-                                "horas": round(total_h, 2),
-                                "horas_extras": h_ext,
-                                "retardo": hubo_retardo,
-                                "actividad": actividades
-                            }).eq("id", id_turno).execute()
-                            st.success("✅ Salida registrada exitosamente. Tus horas extras se calcularon solas.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al marcar salida: {e}")
+                st.button("🔴 MARCAR SALIDA", disabled=True, use_container_width=True)
                 
         st.write("### 📅 Mis horas trabajadas")
         try:
             mis_horas = supabase.table("asistencia").select("*").eq("empleado", emp).execute().data
             if mis_horas:
                 df_mis_h = pd.DataFrame(mis_horas)
-                # Solo mostramos columnas que existen
                 columnas_mostrar = [c for c in ["fecha", "entrada", "salida", "horas", "horas_extras", "retardo", "actividad"] if c in df_mis_h.columns]
                 st.dataframe(df_mis_h[columnas_mostrar], use_container_width=True)
         except Exception:
@@ -295,7 +288,7 @@ elif tipo_acceso == "Administración":
             c1.metric("💰 Gastos Extra", f"${tot_g:,.2f}")
             c2.metric("👥 Nómina", f"${tot_h*20:,.2f}")
             c3.metric("🏢 TOTAL OPERACIÓN", f"${(tot_g + tot_h*20):,.2f}")
-            c4.metric("👷 Horas Totales", f"{tot_h:.1f}")
+            c4.metric("👷 Horas Registradas", f"{tot_h:.1f}")
 
         elif op == "🤖 Asistente":
             st.title("🎙️ Jael")
@@ -367,16 +360,11 @@ elif tipo_acceso == "Administración":
             st.write("---")
             if datos_horas:
                 df = pd.DataFrame(datos_horas)
-                
-                # Pago base total asumiendo 20.0 (puedes ajustarlo si las extras se pagan distinto)
                 if "horas" in df.columns:
                     df["pago_estimado"] = df["horas"] * 20.0
-                
                 st.write("### 📋 Registro de Actividades y Nómina")
                 
-                # Botón Excel incluyendo las nuevas columnas
                 cols_excel = [c for c in ["empleado", "fecha", "entrada", "salida", "horas", "horas_extras", "retardo", "actividad", "pago_estimado"] if c in df.columns]
-                
                 excel_data = generar_excel(df[cols_excel], "Nomina_Actividades")
                 st.download_button(label="📥 Descargar Nómina y Actividades (Excel)", data=excel_data, file_name=f"Nomina_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
                 st.dataframe(df[cols_excel], use_container_width=True)
