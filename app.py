@@ -155,50 +155,54 @@ tipo_acceso = st.sidebar.radio("Selecciona tu perfil:", ["Área de Empleados", "
 if tipo_acceso == "Área de Empleados":
     st.title("⏱️ Reloj Checador")
     
-    try:
-        lista_empleados = supabase.table("empleados").select("*").execute().data
-    except Exception:
-        lista_empleados = []
-    
-    if st.session_state.emp_logged_in is None:
-        if not lista_empleados:
-            st.warning("No hay empleados registrados.")
-        else:
-            nombres = [e["nombre"] for e in lista_empleados]
-            dic_emp = {e["nombre"]: e["pin"] for e in lista_empleados}
-            
-            emp_sel = st.selectbox("Tu Nombre", nombres)
-            pin_input = st.text_input("Tu PIN (4 dígitos)", type="password", max_chars=4)
-            if st.button("Ingresar"):
-                if dic_emp.get(emp_sel) == pin_input:
-                    st.session_state.emp_logged_in = emp_sel
-                    st.rerun()
-                else:
-                    st.error("PIN incorrecto.")
-    else:
-        emp = st.session_state.emp_logged_in
-        st.success(f"Hola, **{emp}**")
-        if st.button("Cerrar mi sesión"):
-            st.session_state.emp_logged_in = None
-            st.rerun()
-            
-        st.write("---")
-        st.write("### 📍 Verificación de Ubicación")
-        loc = streamlit_geolocation()
+            try:
+            turno_abierto = supabase.table("asistencia").select("*").eq("empleado", emp).is_("salida", "null").execute().data
+        except Exception:
+            turno_abierto = []
         
-        ubicacion_valida = False
-        
-        # MANTENEMOS EL GPS ESTRICTO
-        if loc and loc.get("latitude") and loc.get("longitude"):
-            lat_emp = loc["latitude"]
-            lon_emp = loc["longitude"]
-            distancia = calcular_distancia(LAT_SINAGOGA, LON_SINAGOGA, lat_emp, lon_emp)
-            if distancia <= RADIO_PERMITIDO_METROS:
-                st.success(f"✅ Ubicación confirmada en Sinagoga.")
-                ubicacion_valida = True
+        col1, col2 = st.columns(2)
+        with col1:
+            if not turno_abierto:
+                if st.button("🟢 MARCAR ENTRADA", use_container_width=True):
+                    try:
+                        supabase.table("asistencia").insert({"empleado": emp, "fecha": datetime.now().strftime("%Y-%m-%d"), "entrada": datetime.now().strftime("%H:%M:%S"), "horas": 0.0}).execute()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al marcar entrada: {e}")
             else:
-                st.error(f"❌ Estás muy lejos de la sinagoga (Estás a {int(distancia)}m).")
-        
+                st.button("🟢 ENTRADA REGISTRADA", disabled=True, use_container_width=True)
+                
+        with col2:
+            if turno_abierto:
+                st.write("### 📝 Registrar Actividad y Salida")
+                with st.form("salida_form"):
+                    actividades = st.text_area("¿Qué actividades realizaste?", placeholder="Ej: Limpieza...")
+                    
+                    if st.form_submit_button("🔴 GUARDAR Y MARCAR SALIDA"):
+                        if not actividades:
+                            st.error("Por favor, escribe tus actividades antes de salir.")
+                        else:
+                            try:
+                                id_turno = turno_abierto[0]["id"]
+                                h_salida = datetime.now()
+                                t_in = datetime.strptime(f"{turno_abierto[0]['fecha']} {turno_abierto[0]['entrada']}", "%Y-%m-%d %H:%M:%S")
+                                
+                                h_norm, h_ext, hubo_retardo = calcular_desglose_horas(t_in, h_salida)
+                                total_h = h_norm + h_ext
+                                
+                                supabase.table("asistencia").update({
+                                    "salida": h_salida.strftime("%H:%M:%S"), 
+                                    "horas": round(total_h, 2),
+                                    "horas_extras": h_ext,
+                                    "retardo": hubo_retardo,
+                                    "actividad": actividades
+                                }).eq("id", id_turno).execute()
+                                st.success("✅ Salida registrada exitosamente.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al marcar salida: {e}")
+            else:
+                st.button("🔴 MARCAR SALIDA", disabled=True, use_container_width=True)        
         st.write("---")
         
         try:
