@@ -155,7 +155,7 @@ tipo_acceso = st.sidebar.radio("Selecciona tu perfil:", ["Área de Empleados", "
 if tipo_acceso == "Área de Empleados":
     st.title("⏱️ Reloj Checador")
     
-            try:
+                   try:
             turno_abierto = supabase.table("asistencia").select("*").eq("empleado", emp).is_("salida", "null").execute().data
         except Exception:
             turno_abierto = []
@@ -200,6 +200,9 @@ if tipo_acceso == "Área de Empleados":
                                 st.success("✅ Salida registrada exitosamente.")
                                 st.rerun()
                             except Exception as e:
+                                st.error(f"Error al marcar salida: {e}")
+            else:
+                st.button("🔴 MARCAR SALIDA", disabled=True, use_container_width=True)                            except Exception as e:
                                 st.error(f"Error al marcar salida: {e}")
             else:
                 st.button("🔴 MARCAR SALIDA", disabled=True, use_container_width=True)        
