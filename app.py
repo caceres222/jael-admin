@@ -203,11 +203,10 @@ elif tipo_acceso == "Administración":
                     if cC.button("🗑️ Borrar", key=f"del_t_{t['id']}"):
                         supabase.table("asistencia").delete().eq("id", t["id"]).execute()
                         st.rerun()
-
         elif op == "Gastos":
             st.title("📈 Gastos")
             
-            # PUNTO 10: LECTURA Y GUARDADO DE FACTURAS EN BUCKET 'facturas'
+            # PUNTO 10: LECTURA Y GUARDADO DE FACTURAS
             st.write("### 📸 Lector Automático de Facturas")
             foto_factura = st.camera_input("Toma foto a la factura", key="camara")
             
@@ -215,7 +214,71 @@ elif tipo_acceso == "Administración":
                 with st.spinner("🧠 Leyendo recibo y subiendo foto..."):
                     bytes_data = foto_factura.getvalue()
                     img_base64 = base64.b64encode(bytes_data).decode('utf-8')
+                    
+                    url_publica = ""
+                    # 1. Intentar subir la foto a Supabase de forma segura
                     try:
+                        nombre_archivo = f"recibo_{uuid.uuid4().hex}.jpg"
+                        supabase.storage.from_("facturas").upload(
+                            path=nombre_archivo,
+                            file=bytes_data,
+                            file_options={"content-type": "image/jpeg"}
+                        )
+                        url_publica = supabase.storage.from_("facturas").get_public_url(nombre_archivo)
+                    except Exception as e:
+                        st.warning("⚠️ Nota: La carpeta 'facturas' no está lista en Supabase. La foto no se guardará, pero la IA leerá los datos.")
+                        
+                    # 2. Leer con IA de todas formas
+                    try:
+                        resp = client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=[
+                                {"role": "system", "content": "Devuelve un JSON con: 'monto' (solo número float), 'descripcion' (proveedor o concepto), 'categoria' (Limpieza, Proveedores, u Otros)."},
+                                {"role": "user", "content": [{"type": "text", "text": "Extrae los datos."}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}]}
+                            ],
+                            response_format={"type": "json_object"}
+                        )
+                        datos = json.loads(resp.choices[0].message.content)
+                        
+                        st.session_state.f_cat = datos.get("categoria", "Otros")
+                        st.session_state.f_desc = datos.get("descripcion", "")
+                        st.session_state.f_monto = float(datos.get("monto", 0.0))
+                        st.session_state.f_url = url_publica
+                        st.success("✅ ¡Factura leída con éxito!")
+                    except Exception as e:
+                        st.error(f"❌ Error al procesar con IA: {e}")
+
+            st.write("---")
+            with st.form("f2"):
+                cat_index = ["Limpieza", "Proveedores", "Otros"].index(st.session_state.f_cat) if st.session_state.f_cat in ["Limpieza", "Proveedores", "Otros"] else 2
+                cat = st.selectbox("Categoría", ["Limpieza", "Proveedores", "Otros"], index=cat_index)
+                desc = st.text_input("Descripción", value=st.session_state.f_desc)
+                monto = st.number_input("Monto ($)", min_value=0.0, value=st.session_state.f_monto)
+                
+                if st.form_submit_button("Guardar Gasto"):
+                    supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": cat, "descripcion": desc, "monto": monto, "foto_url": st.session_state.f_url}).execute()
+                    st.session_state.f_desc = ""
+                    st.session_state.f_monto = 0.0
+                    st.session_state.f_url = ""
+                    st.rerun()
+
+            # Mostrar tabla de gastos con FOTOS
+            st.write("---")
+            st.write("### 📋 Historial de Gastos")
+            if datos_gastos:
+                for g in datos_gastos:
+                    cA, cB, cC, cD = st.columns([1, 2, 2, 1])
+                    if g.get("foto_url"):
+                        cA.image(g["foto_url"], use_container_width=True)
+                    else:
+                        cA.write("📄 Sin foto")
+                    
+                    cB.write(f"**{g['categoria']}**\n${g['monto']}")
+                    cC.write(f"{g['descripcion']}\n*{g['fecha']}*")
+                    if cD.button("🗑️ Borrar", key=f"del_g_{g['id']}"):
+                        supabase.table("gastos").delete().eq("id", g["id"]).execute()
+                        st.rerun()
+       
                         # 1. Subir la imagen a Supabase (Bucket: facturas)
                         nombre_archivo = f"recibo_{uuid.uuid4().hex}.jpg"
                         supabase.storage.from_("facturas").upload(
