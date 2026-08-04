@@ -6,6 +6,7 @@ import math
 import io
 import json
 import base64
+import uuid
 from streamlit_geolocation import streamlit_geolocation
 from supabase import create_client
 
@@ -72,13 +73,6 @@ def calcular_distancia(lat1, lon1, lat2, lon2):
     a = math.sin(math.radians(lat2 - lat1)/2.0)**2 + math.cos(phi_1)*math.cos(phi_2)*math.sin(math.radians(lon2 - lon1)/2.0)**2
     return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
-def generar_excel(df, sheet_name="Reporte"):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer: df.to_excel(writer, index=False, sheet_name=sheet_name)
-    return output.getvalue()
-
-LAT_SINAGOGA, LON_SINAGOGA, RADIO_PERMITIDO_METROS = 25.7617, -80.1918, 200.0 
-
 # ESTADOS GLOBALES
 if "admin_logged_in" not in st.session_state: st.session_state.admin_logged_in = False
 if "board_logged_in" not in st.session_state: st.session_state.board_logged_in = False
@@ -90,6 +84,9 @@ if "tarifa_extra" not in st.session_state: st.session_state.tarifa_extra = 30.0
 if "f_cat" not in st.session_state: st.session_state.f_cat = "Otros"
 if "f_desc" not in st.session_state: st.session_state.f_desc = ""
 if "f_monto" not in st.session_state: st.session_state.f_monto = 0.0
+if "f_url" not in st.session_state: st.session_state.f_url = ""
+
+LAT_SINAGOGA, LON_SINAGOGA, RADIO_PERMITIDO_METROS = 25.7617, -80.1918, 200.0 
 
 st.sidebar.title("Acceso / Access")
 tipo_acceso = st.sidebar.radio("Selecciona tu perfil:", ["Área de Empleados", "Administración", "Board / Accountant"])
@@ -173,7 +170,7 @@ elif tipo_acceso == "Administración":
         op = st.sidebar.radio("Módulo:", ["Dashboard", "Personal", "Gastos", "💬 Chat Contador"])
 
         try:
-            datos_gastos = supabase.table("gastos").select("*").execute().data
+            datos_gastos = supabase.table("gastos").select("*").order("id", desc=True).execute().data
             datos_horas = supabase.table("asistencia").select("*").execute().data
         except: datos_gastos, datos_horas = [], []
 
@@ -210,30 +207,43 @@ elif tipo_acceso == "Administración":
         elif op == "Gastos":
             st.title("📈 Gastos")
             
-            # PUNTO 10: IA PARA LEER FACTURAS
+            # PUNTO 10: LECTURA Y GUARDADO DE FACTURAS EN BUCKET
             st.write("### 📸 Lector Automático de Facturas")
-            foto_factura = st.camera_input("Toma foto a la factura para llenar los datos automáticamente")
+            foto_factura = st.camera_input("Toma foto a la factura", key="camara")
             
             if foto_factura:
-                with st.spinner("🧠 La IA está leyendo el recibo..."):
+                with st.spinner("🧠 Leyendo recibo y subiendo foto..."):
                     bytes_data = foto_factura.getvalue()
                     img_base64 = base64.b64encode(bytes_data).decode('utf-8')
                     try:
+                        # 1. Subir la imagen a Supabase
+                        nombre_archivo = f"recibo_{uuid.uuid4().hex}.jpg"
+                        supabase.storage.from_("facturas").upload(
+                            path=nombre_archivo,
+                            file=bytes_data,
+                            file_options={"content-type": "image/jpeg"}
+                        )
+                        url_publica = supabase.storage.from_("facturas").get_public_url(nombre_archivo)
+                        
+                        # 2. Leer con IA
                         resp = client.chat.completions.create(
                             model="gpt-4o",
                             messages=[
-                                {"role": "system", "content": "Eres un asistente contable. Analiza la imagen de la factura. Devuelve un JSON con: 'monto' (solo número float), 'descripcion' (qué se compró o nombre del proveedor), 'categoria' (elige estrictamente una: 'Limpieza', 'Proveedores', 'Otros')."},
-                                {"role": "user", "content": [{"type": "text", "text": "Extrae los datos de esta factura."}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}]}
+                                {"role": "system", "content": "Devuelve un JSON con: 'monto' (solo número float), 'descripcion' (proveedor o concepto), 'categoria' (Limpieza, Proveedores, u Otros)."},
+                                {"role": "user", "content": [{"type": "text", "text": "Extrae los datos."}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}]}
                             ],
                             response_format={"type": "json_object"}
                         )
                         datos = json.loads(resp.choices[0].message.content)
+                        
+                        # 3. Guardar en memoria temporal
                         st.session_state.f_cat = datos.get("categoria", "Otros")
                         st.session_state.f_desc = datos.get("descripcion", "")
                         st.session_state.f_monto = float(datos.get("monto", 0.0))
-                        st.success("✅ Factura leída. Revisa los datos abajo y guárdalos.")
+                        st.session_state.f_url = url_publica
+                        st.success("✅ ¡Factura leída con éxito!")
                     except Exception as e:
-                        st.error("❌ No se pudo leer bien la imagen. Intenta tomarla con más luz.")
+                        st.error(f"❌ Error al procesar: {e}")
 
             st.write("---")
             with st.form("f2"):
@@ -241,12 +251,31 @@ elif tipo_acceso == "Administración":
                 cat = st.selectbox("Categoría", ["Limpieza", "Proveedores", "Otros"], index=cat_index)
                 desc = st.text_input("Descripción", value=st.session_state.f_desc)
                 monto = st.number_input("Monto ($)", min_value=0.0, value=st.session_state.f_monto)
+                
                 if st.form_submit_button("Guardar Gasto"):
-                    supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": cat, "descripcion": desc, "monto": monto}).execute()
-                    # Limpiar el formulario
+                    supabase.table("gastos").insert({"fecha": datetime.now().strftime("%Y-%m-%d"), "categoria": cat, "descripcion": desc, "monto": monto, "foto_url": st.session_state.f_url}).execute()
                     st.session_state.f_desc = ""
                     st.session_state.f_monto = 0.0
+                    st.session_state.f_url = ""
                     st.rerun()
+
+            # Mostrar tabla de gastos con FOTOS
+            st.write("---")
+            st.write("### 📋 Historial de Gastos")
+            if datos_gastos:
+                for g in datos_gastos:
+                    cA, cB, cC, cD = st.columns([1, 2, 2, 1])
+                    # Mostrar foto si existe
+                    if g.get("foto_url"):
+                        cA.image(g["foto_url"], use_container_width=True)
+                    else:
+                        cA.write("📄 Sin foto")
+                    
+                    cB.write(f"**{g['categoria']}**\n${g['monto']}")
+                    cC.write(f"{g['descripcion']}\n*{g['fecha']}*")
+                    if cD.button("🗑️ Borrar", key=f"del_g_{g['id']}"):
+                        supabase.table("gastos").delete().eq("id", g["id"]).execute()
+                        st.rerun()
 
         elif op == "💬 Chat Contador":
             st.title("💬 Mensajes con el Contador")
