@@ -207,7 +207,7 @@ elif tipo_acceso == "Administración":
         elif op == "Gastos":
             st.title("📈 Gastos")
             
-            # PUNTO 10: LECTURA Y GUARDADO DE FACTURAS EN BUCKET
+            # PUNTO 10: LECTURA Y GUARDADO DE FACTURAS EN BUCKET 'facturas'
             st.write("### 📸 Lector Automático de Facturas")
             foto_factura = st.camera_input("Toma foto a la factura", key="camara")
             
@@ -216,7 +216,7 @@ elif tipo_acceso == "Administración":
                     bytes_data = foto_factura.getvalue()
                     img_base64 = base64.b64encode(bytes_data).decode('utf-8')
                     try:
-                        # 1. Subir la imagen a Supabase
+                        # 1. Subir la imagen a Supabase (Bucket: facturas)
                         nombre_archivo = f"recibo_{uuid.uuid4().hex}.jpg"
                         supabase.storage.from_("facturas").upload(
                             path=nombre_archivo,
