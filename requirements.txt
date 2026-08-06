@@ -1,6 +1,6 @@
-streamlit==1.32.2
-pandas==2.2.1
-openai==1.14.2
-supabase==2.3.6
-streamlit-geolocation==1.0.0
-openpyxl==3.1.2
+streamlit
+pandas
+openai
+supabase
+streamlit-geolocation
+openpyxl
