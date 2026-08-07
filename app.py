@@ -50,7 +50,7 @@ def traducir_mensaje(texto, al_ingles=True):
     except: 
         return texto
 
-# Reglas de Horarios por día de la semana (0=Lunes, 6=Domingo)
+# Reglas de Horarios
 HORARIOS = {
     0: [[time(6, 0), time(13, 0)]], 
     1: [[time(6, 0), time(13, 0)]],
@@ -82,25 +82,23 @@ def calcular_desglose_horas(t_in, t_out):
     return round(horas_normales, 2), round(horas_extras, 2), llegada_tarde
 
 def calcular_distancia(lat1, lon1, lat2, lon2):
-    R = 6371000 # Radio de la tierra en metros
+    R = 6371000 
     phi_1, phi_2 = math.radians(lat1), math.radians(lat2)
     a = math.sin(math.radians(lat2 - lat1)/2.0)**2 + math.cos(phi_1)*math.cos(phi_2)*math.sin(math.radians(lon2 - lon1)/2.0)**2
     return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
-# ESTADOS GLOBALES DE LA SESIÓN
+# ESTADOS GLOBALES
 if "admin_logged_in" not in st.session_state: st.session_state.admin_logged_in = False
 if "board_logged_in" not in st.session_state: st.session_state.board_logged_in = False
 if "emp_logged_in" not in st.session_state: st.session_state.emp_logged_in = None
 if "tarifa_normal" not in st.session_state: st.session_state.tarifa_normal = 20.0
 if "tarifa_extra" not in st.session_state: st.session_state.tarifa_extra = 30.0
 
-# ESTADOS PARA EL LECTOR DE FACTURAS
 if "f_cat" not in st.session_state: st.session_state.f_cat = "Otros"
 if "f_desc" not in st.session_state: st.session_state.f_desc = ""
 if "f_monto" not in st.session_state: st.session_state.f_monto = 0.0
 if "f_url" not in st.session_state: st.session_state.f_url = ""
 
-# CONFIGURACIÓN DE SEGURIDAD GPS
 LAT_SINAGOGA, LON_SINAGOGA, RADIO_PERMITIDO_METROS = 25.7617, -80.1918, 200.0 
 
 st.sidebar.title("Acceso / Access")
@@ -223,13 +221,11 @@ elif tipo_acceso == "Administración":
         elif op == "Personal":
             st.title("👥 Personal y Horarios")
             
-            # Tarifas de nómina (Punto 3)
             with st.expander("⚙️ Tarifas de Pago Automático"):
                 c1, c2 = st.columns(2)
                 st.session_state.tarifa_normal = c1.number_input("Hora Normal ($)", value=st.session_state.tarifa_normal)
                 st.session_state.tarifa_extra = c2.number_input("Hora Extra ($)", value=st.session_state.tarifa_extra)
             
-            # Definir horario para empleados (Puntos 4 y 5)
             with st.expander("📝 Definir Horario y Actividades"):
                 try: 
                     conf = supabase.table("configuracion").select("*").eq("id", 1).execute().data[0]
@@ -243,7 +239,6 @@ elif tipo_acceso == "Administración":
                         st.success("Guardado. Los empleados lo verán en su pantalla.")
                         st.rerun()
                         
-            # Eliminar/Editar registros de Asistencia (Punto 2)
             st.write("---")
             if datos_horas:
                 st.write("### Historial de Turnos")
@@ -255,10 +250,9 @@ elif tipo_acceso == "Administración":
                         supabase.table("asistencia").delete().eq("id", t["id"]).execute()
                         st.rerun()
 
-               elif op == "Gastos":
+        elif op == "Gastos":
             st.title("📈 Gastos y Facturas")
             
-            # Lector IA de facturas (Punto 10)
             st.write("### 📸 Lector Automático de Facturas")
             foto_factura = st.file_uploader("Sube o toma una foto del recibo con la cámara de tu celular", type=['jpg', 'jpeg', 'png'], key="camara")
             
@@ -268,7 +262,6 @@ elif tipo_acceso == "Administración":
                     img_base64 = base64.b64encode(bytes_data).decode('utf-8')
                     url_publica = ""
                     
-                    # 1. Intentar subir imagen a Storage
                     try:
                         nombre_archivo = f"recibo_{uuid.uuid4().hex}.jpg"
                         supabase.storage.from_("facturas").upload(
@@ -280,7 +273,6 @@ elif tipo_acceso == "Administración":
                     except Exception as e:
                         st.warning("⚠️ El Storage 'facturas' no está configurado. La foto no se guardará, pero la IA leerá los datos.")
                         
-                    # 2. Leer datos con IA
                     try:
                         resp = client.chat.completions.create(
                             model="gpt-4o",
@@ -316,14 +308,12 @@ elif tipo_acceso == "Administración":
                         "foto_url": st.session_state.f_url
                     }).execute()
                     
-                    # Limpiar estado
                     st.session_state.f_desc = ""
                     st.session_state.f_monto = 0.0
                     st.session_state.f_url = ""
                     st.success("Guardado correctamente.")
                     st.rerun()
 
-            # Tabla de Gastos con función de borrado
             st.write("---")
             st.write("### 📋 Historial de Gastos")
             if datos_gastos:
