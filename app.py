@@ -255,12 +255,12 @@ elif tipo_acceso == "Administración":
                         supabase.table("asistencia").delete().eq("id", t["id"]).execute()
                         st.rerun()
 
-        elif op == "Gastos":
+               elif op == "Gastos":
             st.title("📈 Gastos y Facturas")
             
             # Lector IA de facturas (Punto 10)
             st.write("### 📸 Lector Automático de Facturas")
-            foto_factura = st.camera_input("Toma foto a la factura para extraer datos", key="camara")
+            foto_factura = st.file_uploader("Sube o toma una foto del recibo con la cámara de tu celular", type=['jpg', 'jpeg', 'png'], key="camara")
             
             if foto_factura:
                 with st.spinner("🧠 Analizando factura y guardando imagen..."):
