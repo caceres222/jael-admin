@@ -262,7 +262,13 @@ elif tipo_acceso == "Administración":
                     img_base64 = base64.b64encode(bytes_data).decode('utf-8')
                     url_publica = ""
                     
+                                        # 1. Subir imagen a Storage (Con creación automática de bucket)
                     try:
+                        # Revisar si el bucket existe; si no, crearlo como público
+                        buckets_existentes = [b.name for b in supabase.storage.list_buckets()]
+                        if "facturas" not in buckets_existentes:
+                            supabase.storage.create_bucket("facturas", options={"public": True})
+                            
                         nombre_archivo = f"recibo_{uuid.uuid4().hex}.jpg"
                         supabase.storage.from_("facturas").upload(
                             path=nombre_archivo,
@@ -271,7 +277,7 @@ elif tipo_acceso == "Administración":
                         )
                         url_publica = supabase.storage.from_("facturas").get_public_url(nombre_archivo)
                     except Exception as e:
-                        st.warning("⚠️ El Storage 'facturas' no está configurado. La foto no se guardará, pero la IA leerá los datos.")
+                        st.warning(f"⚠️ Nota sobre la imagen: {e}. Se procederá solo con la lectura de texto.")
                         
                     try:
                         resp = client.chat.completions.create(
