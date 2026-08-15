@@ -50,6 +50,12 @@ def traducir_mensaje(texto, al_ingles=True):
     except: 
         return texto
 
+def generar_excel(dataframe, sheet_name="Reporte"):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        dataframe.to_excel(writer, index=False, sheet_name=sheet_name)
+    return output.getvalue()
+
 # Reglas de Horarios
 HORARIOS = {
     0: [[time(6, 0), time(13, 0)]], 
@@ -250,6 +256,15 @@ elif tipo_acceso == "Administración":
                         supabase.table("asistencia").delete().eq("id", t["id"]).execute()
                         st.rerun()
 
+                st.write("---")
+                st.write("### 📊 Tabla de Datos y Excel (Nómina)")
+                df_horas = pd.DataFrame(datos_horas)
+                cols_mostrar = [c for c in ["empleado", "fecha", "entrada", "salida", "horas", "horas_extras", "actividad"] if c in df_horas.columns]
+                st.dataframe(df_horas[cols_mostrar], use_container_width=True)
+                
+                excel_data = generar_excel(df_horas[cols_mostrar], "Nomina")
+                st.download_button("📥 Descargar Excel de Nómina", data=excel_data, file_name="Nomina_Sinagoga.xlsx", type="primary")
+
         elif op == "Gastos":
             st.title("📈 Gastos y Facturas")
             
@@ -262,9 +277,7 @@ elif tipo_acceso == "Administración":
                     img_base64 = base64.b64encode(bytes_data).decode('utf-8')
                     url_publica = ""
                     
-                                        # 1. Subir imagen a Storage (Con creación automática de bucket)
                     try:
-                        # Revisar si el bucket existe; si no, crearlo como público
                         buckets_existentes = [b.name for b in supabase.storage.list_buckets()]
                         if "facturas" not in buckets_existentes:
                             supabase.storage.create_bucket("facturas", options={"public": True})
@@ -277,7 +290,7 @@ elif tipo_acceso == "Administración":
                         )
                         url_publica = supabase.storage.from_("facturas").get_public_url(nombre_archivo)
                     except Exception as e:
-                        st.warning(f"⚠️ Nota sobre la imagen: {e}. Se procederá solo con la lectura de texto.")
+                        st.warning(f"⚠️ Nota: {e}. Se procederá solo con la lectura de texto.")
                         
                     try:
                         resp = client.chat.completions.create(
@@ -335,6 +348,15 @@ elif tipo_acceso == "Administración":
                     if cD.button("🗑️ Borrar", key=f"del_g_{g['id']}"):
                         supabase.table("gastos").delete().eq("id", g["id"]).execute()
                         st.rerun()
+                
+                st.write("---")
+                st.write("### 📊 Tabla de Datos y Excel (Gastos)")
+                df_gastos = pd.DataFrame(datos_gastos)
+                cols_g = [c for c in ["fecha", "categoria", "descripcion", "monto"] if c in df_gastos.columns]
+                st.dataframe(df_gastos[cols_g], use_container_width=True)
+                
+                excel_gastos = generar_excel(df_gastos[cols_g], "Gastos")
+                st.download_button("📥 Descargar Excel de Gastos", data=excel_gastos, file_name="Gastos_Sinagoga.xlsx", type="primary")
 
         elif op == "💬 Chat Contador":
             st.title("💬 Chat con Contabilidad")
@@ -386,6 +408,13 @@ elif tipo_acceso == "Board / Accountant":
             c1.metric("💰 Total Expenses", f"${tot_g:,.2f}")
             c2.metric("👥 Estimated Payroll", f"${pago_nomina:,.2f}")
             c3.metric("🏢 TOTAL OPEX", f"${(tot_g + pago_nomina):,.2f}")
+            
+            if dg:
+                st.write("---")
+                st.write("### Expense Breakdown")
+                df_dg = pd.DataFrame(dg)
+                cols_b = [c for c in ["fecha", "categoria", "descripcion", "monto"] if c in df_dg.columns]
+                st.dataframe(df_dg[cols_b].rename(columns={"fecha":"Date", "categoria":"Category", "descripcion":"Description", "monto":"Amount ($)"}), use_container_width=True)
             
         elif op_board == "💬 Manager Chat":
             st.title("💬 Messages with Manager")
