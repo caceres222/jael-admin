@@ -124,8 +124,9 @@ if tipo_acceso == "Área de Empleados":
     if st.session_state.emp_logged_in is None:
         emp_sel = st.selectbox("Tu Nombre", [e["nombre"] for e in lista_empleados] if lista_empleados else ["No hay empleados"])
         pin_input = st.text_input("Tu PIN (4 dígitos)", type="password", max_chars=4)
-        if st.button("Ingresar") and lista_empleados:
-            if {e["nombre"]: e["pin"] for e in lista_empleados}.get(emp_sel) == pin_input:
+        
+        if st.button("Ingresar"):
+            if lista_empleados and {e["nombre"]: e["pin"] for e in lista_empleados}.get(emp_sel) == pin_input:
                 st.session_state.emp_logged_in = emp_sel
                 st.rerun()
             else: 
@@ -198,11 +199,17 @@ if tipo_acceso == "Área de Empleados":
 # ==========================================
 elif tipo_acceso == "Administración":
     if not st.session_state.admin_logged_in:
-        if st.button("Entrar") and st.text_input("Contraseña", type="password") == "admin123": 
-            st.session_state.admin_logged_in = True
-            st.rerun()
+        st.title("🔒 Acceso a Administración")
+        pwd_admin = st.text_input("Contraseña", type="password")
+        if st.button("Entrar a Administración"):
+            if pwd_admin == "admin123": 
+                st.session_state.admin_logged_in = True
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta.")
     else:
-        if st.sidebar.button("Cerrar Sesión"): 
+        st.sidebar.write("---")
+        if st.sidebar.button("🔒 Cerrar Sesión Admin"): 
             st.session_state.admin_logged_in = False
             st.rerun()
             
@@ -383,11 +390,17 @@ elif tipo_acceso == "Administración":
 # ==========================================
 elif tipo_acceso == "Board / Accountant":
     if not st.session_state.board_logged_in:
-        if st.button("Login") and st.text_input("Password", type="password") == "board123": 
-            st.session_state.board_logged_in = True
-            st.rerun()
+        st.title("🔒 Board Login")
+        pwd_b = st.text_input("Password", type="password")
+        if st.button("Login to Board Dashboard"):
+            if pwd_b == "board123": 
+                st.session_state.board_logged_in = True
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
     else:
-        if st.sidebar.button("Logout"): 
+        st.sidebar.write("---")
+        if st.sidebar.button("🔒 Logout Board"): 
             st.session_state.board_logged_in = False
             st.rerun()
             
